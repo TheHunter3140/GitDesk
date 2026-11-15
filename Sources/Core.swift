@@ -2,8 +2,11 @@ import Foundation
 import Security
 
 enum Paths {
-    static var workspaces: URL {
-        let d = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0].appendingPathComponent("Workspaces")
+    static var documents: URL { FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0] }
+    static var workspaces: URL { make("Workspaces") }
+    static var downloads: URL { make("Téléchargements") }
+    private static func make(_ n: String) -> URL {
+        let d = documents.appendingPathComponent(n)
         try? FileManager.default.createDirectory(at: d, withIntermediateDirectories: true)
         return d
     }

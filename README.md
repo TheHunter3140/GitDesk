@@ -20,3 +20,11 @@ Même chaîne que Pal : XcodeGen + GitHub Actions, IPA non signé (`.github/work
 - Bac à sable : par défaut, les liens hors GitHub s'ouvrent dans une fenêtre Safari séparée (réglable : « Limiter à GitHub »).
 - Connexion simplifiée : bouton pour créer le token (déjà prérempli) et coller depuis le presse-papiers.
 - Ergonomie : recherche intégrée à l'onglet Fichiers, bouton « N modifications · Commit », confirmation avant rétablir/supprimer, retour haptique, bouton « Voir sur GitHub » après un push, undo/redo dans la barre du clavier, messages d'erreur 404/403 expliqués.
+
+## Nouveautés 1.2.0
+- Deux parties : **Travail** (dépôts, outils) et **Paramètres**. Logo ajouté.
+- **Fichiers** : explorateur complet (Travail → Fichiers et archives, ou « Importer, extraire, copier… » dans un dépôt). Importer des fichiers, un dossier ou une archive depuis l'app Fichiers ; copier / couper / coller (remplacer, garder les deux ou ignorer en cas de doublon), dupliquer, renommer, supprimer, partager, créer dossiers et fichiers, sélection multiple.
+- **Extraction** : ZIP, TAR, TAR.GZ/TGZ, GZ (sans ZIP64 ni archives chiffrées). Pas de 7z/RAR.
+- **Navigateur** : réglages mémorisés (taille du texte 50–150 %, défaut 85 %, version ordinateur, limitation à GitHub, dernière page), favoris, historique, session GitHub conservée.
+- **Téléchargements** : gestionnaire dédié (progression, annulation, ouvrir, partager, extraire), fichiers dans Documents/Téléchargements.
+- **Cache et confidentialité** : tailles, vider le cache, cookies, historique, nettoyer le navigateur, tout vider.

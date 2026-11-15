@@ -7,6 +7,7 @@ struct WorkspaceView: View {
     @State private var showNew = false
     @State private var newIsFolder = false
     @State private var newName = ""
+    @State private var showFiles = false
 
     init(ws: Workspace) {
         _ws = ObservedObject(wrappedValue: ws)
@@ -23,6 +24,7 @@ struct WorkspaceView: View {
         }
         .navigationTitle(ws.repo.name)
         .navigationBarTitleDisplayMode(.inline)
+        .toolbar(.hidden, for: .tabBar)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 VStack(spacing: 0) {
@@ -35,6 +37,8 @@ struct WorkspaceView: View {
                     Menu {
                         Button { newIsFolder = false; newName = ""; showNew = true } label: { Label("Nouveau fichier", systemImage: "doc.badge.plus") }
                         Button { newIsFolder = true; newName = ""; showNew = true } label: { Label("Nouveau dossier", systemImage: "folder.badge.plus") }
+                        Divider()
+                        Button { showFiles = true } label: { Label("Importer, extraire, copier…", systemImage: "square.and.arrow.down.on.square") }
                     } label: { Image(systemName: "plus") }
                     .accessibilityLabel("Nouveau")
                 }
@@ -51,6 +55,12 @@ struct WorkspaceView: View {
             }
         }
         .task { await ws.refresh() }
+        .sheet(isPresented: $showFiles, onDismiss: { Task { await ws.refresh() } }) {
+            NavigationStack {
+                FileBrowserView(dir: ws.root, title: ws.repo.name)
+                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fermer") { showFiles = false } } }
+            }
+        }
         .alert("Erreur", isPresented: Binding(get: { ws.error != nil }, set: { if !$0 { ws.error = nil } })) {
             Button("OK") {}
         } message: { Text(ws.error ?? "") }

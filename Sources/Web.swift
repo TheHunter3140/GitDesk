@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import SafariServices
+import Combine
 
 struct ShareSheet: UIViewControllerRepresentable {
     let items: [Any]
@@ -17,36 +18,37 @@ struct SafariView: UIViewControllerRepresentable {
 }
 
 enum WebSheet: Identifiable {
-    case external(URL), share(URL)
+    case external(URL), share(URL), library, downloads
     var id: String {
         switch self {
         case .external(let u): return "e" + u.absoluteString
         case .share(let u): return "s" + u.absoluteString
+        case .library: return "library"
+        case .downloads: return "downloads"
         }
     }
 }
 
 struct WebTarget: Identifiable {
-    let url: URL
-    var id: String { url.absoluteString }
+    let url: URL?
+    var id: String { url?.absoluteString ?? "home" }
 }
 
-// MARK: - Modèle du navigateur (WKWebView persistant, cookies conservés)
+// MARK: - Modèle du navigateur (WKWebView persistant, cookies conservés, réglages mémorisés)
 @MainActor
 final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDelegate, WKDownloadDelegate {
     let webView: WKWebView
+    let store = BrowserStore.shared
     @Published var url: URL?
     @Published var title = ""
     @Published var canGoBack = false
     @Published var canGoForward = false
     @Published var isLoading = false
     @Published var progress = 0.0
-    @Published var desktop = false
-    @Published var restrict = true
     @Published var sheet: WebSheet?
-    private var zoom: CGFloat = 1
+    @Published var toast: String?
     private var obs: [NSKeyValueObservation] = []
-    private var downloadDest: URL?
+    private var cancellables = Set<AnyCancellable>()
 
     static let hosts = ["github.com", "githubusercontent.com", "githubassets.com", "githubapp.com"]
     static func isGitHub(_ u: URL) -> Bool {
@@ -54,7 +56,9 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         return hosts.contains { h == $0 || h.hasSuffix("." + $0) }
     }
 
-    init(start: URL? = URL(string: "https://github.com")) {
+    init(start: URL? = nil) {
+        let st = BrowserStore.shared
+        let first: URL? = start ?? (st.restoreLast ? URL(string: st.lastURL) : nil) ?? URL(string: "https://github.com")
         let cfg = WKWebViewConfiguration()
         cfg.websiteDataStore = .default()
         cfg.allowsInlineMediaPlayback = true
@@ -65,6 +69,7 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         webView.allowsBackForwardNavigationGestures = true
         webView.allowsLinkPreview = true
         webView.isFindInteractionEnabled = true
+        webView.pageZoom = CGFloat(st.zoom)
         let rc = UIRefreshControl()
         rc.addTarget(self, action: #selector(pulled), for: .valueChanged)
         webView.scrollView.refreshControl = rc
@@ -76,7 +81,8 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
             webView.observe(\.isLoading) { [weak self] _, _ in Task { @MainActor in self?.sync() } },
             webView.observe(\.estimatedProgress) { [weak self] _, _ in Task { @MainActor in self?.sync() } }
         ]
-        if let start { webView.load(URLRequest(url: start)) }
+        st.$zoom.sink { [weak self] z in self?.webView.pageZoom = CGFloat(z) }.store(in: &cancellables)
+        if let first { webView.load(URLRequest(url: first)) }
     }
 
     @objc private func pulled() { webView.reload() }
@@ -90,14 +96,17 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         progress = webView.estimatedProgress
     }
 
+    func showToast(_ s: String) {
+        toast = s
+        Task { try? await Task.sleep(nanoseconds: 3_500_000_000); if toast == s { toast = nil } }
+    }
+
     // MARK: actions
     func load(_ u: URL) { webView.load(URLRequest(url: u)) }
     func open(_ s: String) { if let u = URL(string: s) { load(u) } }
     func reloadOrStop() { if webView.isLoading { webView.stopLoading() } else { webView.reload() } }
     func find() { webView.findInteraction?.presentFindNavigator(showingReplace: false) }
     func openInSafari() { if let u = webView.url { UIApplication.shared.open(u) } }
-    func zoomIn() { zoom = min(3, zoom + 0.1); webView.pageZoom = zoom }
-    func zoomOut() { zoom = max(0.5, zoom - 0.1); webView.pageZoom = zoom }
 
     func go(_ input: String) {
         let t = input.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -117,11 +126,11 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
                  decisionHandler: @escaping (WKNavigationActionPolicy, WKWebpagePreferences) -> Void) {
         guard let url = action.request.url else { decisionHandler(.cancel, preferences); return }
         let scheme = url.scheme?.lowercased() ?? ""
-        preferences.preferredContentMode = desktop ? .desktop : .mobile
+        preferences.preferredContentMode = store.desktop ? .desktop : .mobile
         if scheme == "http" || scheme == "https" {
             let main = action.targetFrame?.isMainFrame ?? true
-            if main && restrict && !Self.isGitHub(url) {
-                sheet = .external(url)   // hors GitHub : ouvert dans une fenêtre Safari séparée
+            if main && store.restrict && !Self.isGitHub(url) {
+                sheet = .external(url)
                 decisionHandler(.cancel, preferences)
                 return
             }
@@ -138,17 +147,21 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         decisionHandler(r.canShowMIMEType && !cd.hasPrefix("attachment") ? .allow : .download)
     }
 
-    func webView(_ w: WKWebView, didFinish navigation: WKNavigation!) { w.scrollView.refreshControl?.endRefreshing() }
+    func webView(_ w: WKWebView, didCommit navigation: WKNavigation!) { w.pageZoom = CGFloat(store.zoom) }
+    func webView(_ w: WKWebView, didFinish navigation: WKNavigation!) {
+        w.scrollView.refreshControl?.endRefreshing()
+        w.pageZoom = CGFloat(store.zoom)
+        store.visit(w.url, w.title ?? "")
+    }
     func webView(_ w: WKWebView, didFail navigation: WKNavigation!, withError error: Error) { w.scrollView.refreshControl?.endRefreshing() }
     func webView(_ w: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) { w.scrollView.refreshControl?.endRefreshing() }
 
-    // target=_blank : on reste dans la même vue
     func webView(_ w: WKWebView, createWebViewWith configuration: WKWebViewConfiguration, for action: WKNavigationAction, windowFeatures: WKWindowFeatures) -> WKWebView? {
         if action.targetFrame == nil { w.load(action.request) }
         return nil
     }
 
-    // MARK: boîtes de dialogue JavaScript (confirm() de GitHub, etc.)
+    // MARK: boîtes JavaScript
     func webView(_ w: WKWebView, runJavaScriptAlertPanelWithMessage message: String, initiatedByFrame frame: WKFrameInfo, completionHandler: @escaping () -> Void) {
         let a = UIAlertController(title: nil, message: message, preferredStyle: .alert)
         a.addAction(UIAlertAction(title: "OK", style: .default) { _ in completionHandler() })
@@ -168,20 +181,24 @@ final class WebModel: NSObject, ObservableObject, WKNavigationDelegate, WKUIDele
         top.present(vc, animated: true)
     }
 
-    // MARK: téléchargements (ZIP, release assets…) -> feuille de partage / Enregistrer dans Fichiers
+    // MARK: téléchargements -> Documents/Téléchargements (gestionnaire dédié)
     func webView(_ w: WKWebView, navigationResponse: WKNavigationResponse, didBecome download: WKDownload) { download.delegate = self }
     func webView(_ w: WKWebView, navigationAction: WKNavigationAction, didBecome download: WKDownload) { download.delegate = self }
 
     func download(_ download: WKDownload, decideDestinationUsing response: URLResponse, suggestedFilename: String, completionHandler: @escaping (URL?) -> Void) {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let dest = dir.appendingPathComponent(suggestedFilename)
-        downloadDest = dest
+        let dest = DownloadManager.shared.destination(for: suggestedFilename, download: download, source: response.url)
+        showToast("Téléchargement : \(dest.lastPathComponent)")
         completionHandler(dest)
     }
 
     func downloadDidFinish(_ download: WKDownload) {
-        if let d = downloadDest { sheet = .share(d) }
+        DownloadManager.shared.finished(download)
+        showToast("Téléchargement terminé · toucher pour ouvrir")
+    }
+
+    func download(_ download: WKDownload, didFailWithError error: Error, resumeData: Data?) {
+        DownloadManager.shared.failed(download)
+        showToast("Téléchargement échoué")
     }
 }
 
@@ -193,6 +210,7 @@ struct WebContainer: UIViewRepresentable {
 
 struct WebBrowserView: View {
     @ObservedObject var m: WebModel
+    @ObservedObject private var store = BrowserStore.shared
     @State private var editing = false
     @State private var text = ""
     @FocusState private var focused: Bool
@@ -211,13 +229,33 @@ struct WebBrowserView: View {
             }
             bottomBar
         }
+        .overlay(alignment: .top) {
+            if let t = m.toast {
+                Button { m.sheet = .downloads } label: {
+                    Label(t, systemImage: "arrow.down.circle.fill").font(.footnote)
+                        .padding(.horizontal, 12).padding(.vertical, 8)
+                        .background(.thinMaterial, in: Capsule())
+                }
+                .padding(.top, 56)
+            }
+        }
         .sheet(item: $m.sheet) { s in
             switch s {
             case .external(let u): SafariView(url: u).ignoresSafeArea()
             case .share(let u): ShareSheet(items: [u])
+            case .library:
+                NavigationStack {
+                    BrowserLibraryView { u in m.load(u); m.sheet = nil }
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fermer") { m.sheet = nil } } }
+                }
+            case .downloads:
+                NavigationStack {
+                    DownloadsView()
+                        .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fermer") { m.sheet = nil } } }
+                }
             }
         }
-        .onChange(of: m.desktop) { _ in m.webView.reload() }
+        .onChange(of: store.desktop) { _ in m.webView.reload() }
     }
 
     private var addressBar: some View {
@@ -242,7 +280,7 @@ struct WebBrowserView: View {
                 }
             }
             .padding(.horizontal, 10).padding(.vertical, 8)
-            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 10))
+            .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             if editing { Button("Annuler") { editing = false; focused = false } }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
@@ -263,13 +301,21 @@ struct WebBrowserView: View {
                 .accessibilityLabel(m.isLoading ? "Arrêter" : "Recharger")
             Spacer()
             Menu {
+                Button { store.toggleBookmark(m.url, title: m.title) } label: {
+                    Label(store.isBookmarked(m.url) ? "Retirer des favoris" : "Ajouter aux favoris",
+                          systemImage: store.isBookmarked(m.url) ? "star.slash" : "star")
+                }
+                Button { m.sheet = .library } label: { Label("Favoris et historique", systemImage: "book") }
+                Button { m.sheet = .downloads } label: { Label("Téléchargements", systemImage: "arrow.down.circle") }
+                Divider()
                 Button { m.openInSafari() } label: { Label("Ouvrir dans Safari", systemImage: "safari") }
                 Button { m.find() } label: { Label("Rechercher dans la page", systemImage: "text.magnifyingglass") }
                 Button { UIPasteboard.general.string = m.url?.absoluteString } label: { Label("Copier le lien", systemImage: "link") }
-                Toggle("Version ordinateur", isOn: $m.desktop)
-                Toggle("Limiter à GitHub", isOn: $m.restrict)
-                Button { m.zoomIn() } label: { Label("Agrandir la page", systemImage: "plus.magnifyingglass") }
-                Button { m.zoomOut() } label: { Label("Réduire la page", systemImage: "minus.magnifyingglass") }
+                Divider()
+                Toggle("Version ordinateur", isOn: $store.desktop)
+                Toggle("Limiter à GitHub", isOn: $store.restrict)
+                Button { store.zoom = min(1.5, ((store.zoom + 0.05) * 100).rounded() / 100) } label: { Label("Texte plus grand (\(Int((store.zoom * 100).rounded())) %)", systemImage: "textformat.size.larger") }
+                Button { store.zoom = max(0.5, ((store.zoom - 0.05) * 100).rounded() / 100) } label: { Label("Texte plus petit", systemImage: "textformat.size.smaller") }
                 Divider()
                 Button { m.open("https://github.com") } label: { Label("Accueil GitHub", systemImage: "house") }
                 Button { m.open("https://github.com/notifications") } label: { Label("Notifications", systemImage: "bell") }
@@ -284,12 +330,10 @@ struct WebBrowserView: View {
 }
 
 struct GitHubWebScreen: View {
-    let start: URL
     @Environment(\.dismiss) private var dismiss
     @StateObject private var m: WebModel
 
-    init(start: URL = URL(string: "https://github.com")!) {
-        self.start = start
+    init(start: URL? = nil) {
         _m = StateObject(wrappedValue: WebModel(start: start))
     }
 

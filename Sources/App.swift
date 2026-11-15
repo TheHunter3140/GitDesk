@@ -3,8 +3,9 @@ import SwiftUI
 @main
 struct GitDeskApp: App {
     @StateObject private var session = Session()
+    @StateObject private var clipboard = FileClipboard()
     var body: some Scene {
-        WindowGroup { RootView().environmentObject(session) }
+        WindowGroup { RootView().environmentObject(session).environmentObject(clipboard) }
     }
 }
 
@@ -80,7 +81,14 @@ final class Session: ObservableObject {
 struct RootView: View {
     @EnvironmentObject var s: Session
     var body: some View {
-        if s.token == nil { LoginView() } else { RepoListView() }
+        if s.token == nil {
+            LoginView()
+        } else {
+            TabView {
+                RepoListView().tabItem { Label("Travail", systemImage: "briefcase.fill") }
+                SettingsView().tabItem { Label("Paramètres", systemImage: "gearshape.fill") }
+            }
+        }
     }
 }
 
@@ -126,11 +134,16 @@ struct RepoListView: View {
     private var filtered: [GHRepo] {
         q.isEmpty ? s.remoteRepos : s.remoteRepos.filter { $0.full_name.localizedCaseInsensitiveContains(q) }
     }
-    private func gh(_ p: String) -> WebTarget { WebTarget(url: URL(string: "https://github.com" + p)!) }
+    private func gh(_ p: String) -> WebTarget { WebTarget(url: URL(string: "https://github.com" + p)) }
 
     var body: some View {
         NavigationStack(path: $path) {
             List {
+                Section("Outils") {
+                    Button { web = WebTarget(url: nil) } label: { tileLabel("Navigateur GitHub", "safari.fill", .blue) }
+                    NavigationLink { DownloadsView() } label: { tileLabel("Téléchargements", "arrow.down.circle.fill", .green) }
+                    NavigationLink { FileBrowserView(dir: Paths.documents, title: "Fichiers") } label: { tileLabel("Fichiers et archives", "folder.fill", .orange) }
+                }
                 if !s.local.isEmpty {
                     Section("Sur l'appareil") {
                         ForEach(s.local) { r in
@@ -172,11 +185,8 @@ struct RepoListView: View {
             }
             .searchable(text: $q, prompt: "Filtrer les dépôts")
             .refreshable { await s.refresh() }
-            .navigationTitle("Dépôts")
+            .navigationTitle("Travail")
             .toolbar {
-                ToolbarItem(placement: .navigationBarLeading) {
-                    Button { web = gh("") } label: { Image(systemName: "globe") }.accessibilityLabel("GitHub (web)")
-                }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
                         Text("Connecté : \(s.login)")
@@ -184,8 +194,6 @@ struct RepoListView: View {
                         Button { web = gh("/pulls") } label: { Label("Pull requests", systemImage: "arrow.triangle.pull") }
                         Button { web = gh("/issues") } label: { Label("Issues", systemImage: "circle.dotted") }
                         Button { web = gh("/new") } label: { Label("Nouveau dépôt", systemImage: "plus.square") }
-                        Divider()
-                        Button("Se déconnecter", role: .destructive) { s.signOut() }
                     } label: { Image(systemName: "person.circle") }
                 }
             }
