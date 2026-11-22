@@ -81,6 +81,7 @@ final class Session: ObservableObject {
 
 struct RootView: View {
     @EnvironmentObject var s: Session
+    @EnvironmentObject var builds: BuildCenter
     var body: some View {
         if s.token == nil {
             LoginView()
@@ -90,6 +91,7 @@ struct RootView: View {
                 CompilerView().tabItem { Label("Compiler", systemImage: "hammer.fill") }
                 SettingsView().tabItem { Label("Paramètres", systemImage: "gearshape.fill") }
             }
+            .task { builds.start(session: s) }
         }
     }
 }
@@ -103,8 +105,8 @@ struct LoginView: View {
         NavigationStack {
             Form {
                 Section(header: Text("1. Crée ton token"),
-                        footer: Text("GitHub n'accepte plus le mot de passe dans les apps : le token le remplace. Connecte-toi à GitHub dans la fenêtre, vérifie que « repo » est coché, touche « Generate token », puis copie le texte qui commence par ghp_.")) {
-                    Button { web = WebTarget(url: URL(string: "https://github.com/settings/tokens/new?scopes=repo&description=GitDesk")!) } label: {
+                        footer: Text("GitHub n'accepte plus le mot de passe dans les apps : le token le remplace. Connecte-toi à GitHub dans la fenêtre, vérifie que « repo » et « workflow » sont cochés, touche « Generate token », puis copie le texte qui commence par ghp_.")) {
+                    Button { web = WebTarget(url: URL(string: "https://github.com/settings/tokens/new?scopes=repo,workflow&description=GitDesk")!) } label: {
                         Label("Ouvrir GitHub et créer un token", systemImage: "globe")
                     }
                 }

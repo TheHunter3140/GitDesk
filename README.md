@@ -29,11 +29,16 @@ Même chaîne que Pal : XcodeGen + GitHub Actions, IPA non signé (`.github/work
 - **Téléchargements** : gestionnaire dédié (progression, annulation, ouvrir, partager, extraire), fichiers dans Documents/Téléchargements.
 - **Cache et confidentialité** : tailles, vider le cache, cookies, historique, nettoyer le navigateur, tout vider.
 
+## Nouveautés 1.4.0
+- **Dossier surveillé** : dépose une archive (ZIP, TAR, TAR.GZ) ou un dossier de code source dans Fichiers → GitDesk → Builds. GitDesk le détecte dès que la copie est terminée (app ouverte), le compile automatiquement (réglable), range l'original dans « Traitées » et dépose le résultat dans « Résultats ». Un dossier `Build` / `build` à la racine de Documents est aussi surveillé.
+- **Workflow façon Pal** : journal complet copié dans un fichier, **résumé des logs** (erreurs, avertissements, durée, fin du journal) écrit dans le résumé du run et dans les notes de la release, puis **publication dans la release « <projet>-latest »** (remplacée à chaque build ; en cas d'échec : « <projet>-latest-echec » avec le résumé et le journal). L'artefact Actions reste en secours.
+- Le workflow de GitDesk lui-même (`.github/workflows/build.yaml`) suit le même modèle : l'IPA non signé est publié dans la release **gitdesk-latest**.
+- **Plus de limite à 50 Mo** : l'archive est envoyée comme fichier d'une release brouillon (2 Go maximum, envoi depuis le disque), puis supprimée après le build.
+- Dossier compressé localement avec conservation des bits d'exécution (gradlew, scripts).
+- Téléchargements sécurisés : le jeton n'est plus transmis lors des redirections vers un autre hôte.
+- Le lien de création de token demande maintenant `repo` **et** `workflow`.
+
 ## Nouveautés 1.3.0
-- Onglet **Compiler** : dépose une archive complète du code source (ZIP, TAR, TAR.GZ, 50 Mo max), GitDesk s'occupe du reste.
-- Détection automatique du projet : XcodeGen, Xcode (.xcodeproj/.xcworkspace, CocoaPods), Swift Package, Android/Gradle, Gradle/Java, Rust, Go, CMake, Make, Node.js, Python, .NET, et sources C / C++ / Java isolées.
-- Un workflow GitHub Actions est généré, puis l'archive est envoyée telle quelle sur une branche `build/…` d'un dépôt dédié (`gitdesk-builds` par défaut, créé automatiquement). Le workflow s'exécute au push, extrait l'archive et compile (IPA non signé pour iOS, APK pour Android, exécutables sinon).
-- Suivi en direct (en attente / en cours / réussi / échec), reprise du suivi à la réouverture ou en tirant la liste, annulation, étape en échec et fin du journal affichées.
-- Résultat téléchargé et extrait dans Documents/Téléchargements/Builds, partageable (Fichiers, AirDrop, outil de signature).
-- Notifications : push via **ntfy** (dernière étape du workflow, fonctionne app fermée) + notification locale quand l'app est active. Réglages : engrenage de l'onglet Compiler.
+- Onglet **Compiler** : détection du type de projet (XcodeGen, Xcode, Swift Package, Android/Gradle, Gradle/Java, Rust, Go, CMake, Make, Node.js, Python, .NET, sources C / C++ / Java), workflow GitHub Actions généré, suivi en direct, reprise, annulation, résultat téléchargé et partageable.
+- Notifications : push via **ntfy** (dernière étape du workflow, fonctionne app fermée) + notification locale quand l'app est active.
 - Token GitHub : portées `repo` et `workflow` requises.

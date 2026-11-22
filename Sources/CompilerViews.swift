@@ -11,21 +11,50 @@ struct CompilerView: View {
     @State private var picking = false
     @State private var showSettings = false
     @State private var errorText: String?
+    @AppStorage("build_auto") private var auto = true
 
     var body: some View {
         NavigationStack {
             List {
-                Section(footer: Text("Dépose une archive ZIP, TAR ou TAR.GZ du code source. Le type de projet est détecté, le workflow est généré, la compilation tourne sur GitHub Actions et tu es notifié à la fin.")) {
+                Section(footer: Text("Dépose une archive (ZIP, TAR, TAR.GZ) ou un dossier de code source. Le type de projet est détecté, le workflow est généré, la compilation tourne sur GitHub Actions et tu es notifié à la fin.")) {
                     Button { picking = true } label: {
                         VStack(spacing: 8) {
                             Image(systemName: "shippingbox.and.arrow.backward.fill").font(.system(size: 34))
-                            Text("Choisir ou déposer une archive").font(.headline)
+                            Text("Choisir une archive").font(.headline)
                             Text("Fichiers, iCloud, AirDrop…").font(.caption).foregroundColor(.secondary)
                         }
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 18)
+                        .padding(.vertical, 14)
                     }
                 }
+
+                Section(header: Text("Dossier surveillé"),
+                        footer: Text(auto
+                                     ? "Dans Fichiers : Sur mon iPhone → GitDesk → Builds. Tout ce que tu y déposes est détecté et compilé automatiquement ; l'original est rangé dans « Traitées » et le résultat arrive dans « Résultats »."
+                                     : "Dans Fichiers : Sur mon iPhone → GitDesk → Builds. La compilation automatique est désactivée (réglages) : touche « Compiler » pour lancer.")) {
+                    if b.inbox.isEmpty {
+                        Label("Aucune archive en attente", systemImage: "tray").foregroundColor(.secondary)
+                    }
+                    ForEach(b.inbox) { it in
+                        HStack(spacing: 12) {
+                            Image(systemName: it.isFolder ? "folder.fill" : "doc.zipper")
+                                .foregroundColor(it.supported ? .accentColor : .orange)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(it.name).lineLimit(1)
+                                Text(it.supported ? (it.ready ? "Prête" : "Copie en cours…") : "Format non pris en charge (dossier, ZIP, TAR, TAR.GZ)")
+                                    .font(.caption).foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            if it.supported && it.ready && !auto {
+                                Button("Compiler") { b.compileNow(it, session: s) }
+                                    .buttonStyle(.borderedProminent)
+                            } else if it.supported && !it.ready {
+                                ProgressView()
+                            }
+                        }
+                    }
+                }
+
                 if b.jobs.isEmpty {
                     Section { Text("Aucune compilation pour l'instant.").foregroundColor(.secondary) }
                 } else {
@@ -46,7 +75,10 @@ struct CompilerView: View {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
                 }
             }
-            .refreshable { b.resumePending(session: s) }
+            .refreshable {
+                await b.scanInbox()
+                b.resumePending(session: s)
+            }
             .fileImporter(isPresented: $picking, allowedContentTypes: [.item], allowsMultipleSelection: false) { result in
                 switch result {
                 case .success(let urls): if let u = urls.first { start(u) }
@@ -60,7 +92,10 @@ struct CompilerView: View {
             }
             .sheet(isPresented: $showSettings) { CompilerSettingsView() }
             .onChange(of: phase) { p in
-                if p == .active { b.resumePending(session: s) }
+                if p == .active {
+                    b.resumePending(session: s)
+                    Task { await b.scanInbox() }
+                }
             }
             .alert("Compiler", isPresented: Binding(get: { errorText != nil }, set: { if !$0 { errorText = nil } })) {
                 Button("OK") {}
@@ -145,9 +180,14 @@ struct BuildDetailView: View {
                         LabeledContent("Durée", value: durationText(f.timeIntervalSince(j.created)))
                     }
                 }
-                if let u = j.runURL, let url = URL(string: u) {
+                if j.runURL != nil || j.releaseURL != nil {
                     Section {
-                        Link(destination: url) { Label("Voir sur GitHub", systemImage: "arrow.up.right.square") }
+                        if let u = j.runURL, let url = URL(string: u) {
+                            Link(destination: url) { Label("Voir le run sur GitHub", systemImage: "arrow.up.right.square") }
+                        }
+                        if let u = j.releaseURL, let url = URL(string: u) {
+                            Link(destination: url) { Label("Voir la release (dernière)", systemImage: "shippingbox") }
+                        }
                     }
                 }
                 if (j.state == .running || j.state == .queued) && j.runId != nil {
@@ -164,7 +204,7 @@ struct BuildDetailView: View {
                     }
                 }
                 if let log = j.log, !log.isEmpty {
-                    Section("Journal (fin)") {
+                    Section("Résumé du build") {
                         Text(log)
                             .font(.system(.caption2, design: .monospaced))
                             .textSelection(.enabled)
@@ -206,14 +246,19 @@ struct CompilerSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("build_repo") private var repo = "gitdesk-builds"
     @AppStorage("build_private") private var isPrivate = true
+    @AppStorage("build_auto") private var auto = true
     @AppStorage("build_ntfy") private var ntfy = true
     @AppStorage("build_topic") private var topic = ""
 
     var body: some View {
         NavigationStack {
             Form {
+                Section(header: Text("Dossier Builds"),
+                        footer: Text("Les archives et dossiers déposés dans Fichiers → GitDesk → Builds sont détectés dès que la copie est terminée (l'app doit être ouverte).")) {
+                    Toggle("Compiler automatiquement", isOn: $auto)
+                }
                 Section(header: Text("Dépôt de compilation"),
-                        footer: Text("Un seul dépôt réutilisé : chaque archive est envoyée sur sa propre branche « build/… ». Il est créé automatiquement. Dépôt privé : les minutes GitHub Actions sont limitées (les runners macOS comptent ×10). Dépôt public : gratuit, mais le code est visible.")) {
+                        footer: Text("Un seul dépôt réutilisé : chaque build a sa propre branche « build/… » et le résultat est publié dans une release « <projet>-latest » (remplacée à chaque build, avec le résumé des logs). Il est créé automatiquement. Dépôt privé : les minutes GitHub Actions sont limitées (les runners macOS comptent ×10). Dépôt public : gratuit, mais le code est visible.")) {
                     TextField("Nom du dépôt", text: $repo)
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
@@ -233,7 +278,7 @@ struct CompilerSettingsView: View {
                     }
                 }
                 Section("À savoir") {
-                    Text("Le token GitHub doit avoir les portées « repo » et « workflow ». Archive : 50 Mo maximum, formats ZIP, TAR, TAR.GZ. Une notification locale s'ajoute quand GitDesk est encore actif.")
+                    Text("Le token GitHub doit avoir les portées « repo » et « workflow ». Archive : 2 Go maximum (ZIP, TAR, TAR.GZ ou dossier) ; garde l'app ouverte pendant l'envoi. Une notification locale s'ajoute quand GitDesk est encore actif.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }

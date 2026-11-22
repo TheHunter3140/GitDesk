@@ -2,26 +2,123 @@ name: Build IPA
 on:
   workflow_dispatch:
   push:
+permissions:
+  contents: write
+env:
+  GD_NAME: "GitDesk"
+  GD_SLUG: "gitdesk"
+  GD_KIND: "XcodeGen (iOS)"
+  GD_SRC_RELEASE: "0"
+  GH_TOKEN: ${{ github.token }}
 jobs:
   build:
     runs-on: macos-15
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash /tmp/gd-shell.sh {0}
     steps:
       - uses: actions/checkout@v4
-      - name: Install XcodeGen
-        run: brew install xcodegen
-      - name: Generate project
-        run: xcodegen generate
-      - name: Build (unsigned)
+      - name: Préparer
+        shell: bash
+        working-directory: .
         run: |
-          xcodebuild -project GitDesk.xcodeproj -scheme GitDesk -configuration Release \
+          cat > /tmp/gd-shell.sh <<'GDEOF'
+          #!/usr/bin/env bash
+          bash -eo pipefail "$1" 2>&1 | tee -a /tmp/gitdesk-build.log
+          exit "${PIPESTATUS[0]}"
+          GDEOF
+          chmod +x /tmp/gd-shell.sh
+          echo "GD_START=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Installer XcodeGen
+        run: brew install xcodegen
+      - name: Générer le projet
+        run: xcodegen generate
+      - name: Compiler (non signé)
+        run: |
+          PROJ=$(ls -d *.xcodeproj | head -1)
+          xcodebuild -project "$PROJ" -scheme "GitDesk" -configuration Release \
             -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
-      - name: Package IPA
+      - name: Fabriquer l'IPA
         run: |
-          mkdir Payload
-          cp -R build/Build/Products/Release-iphoneos/GitDesk.app Payload/
-          zip -qr GitDesk.ipa Payload
-      - uses: actions/upload-artifact@v4
+          mkdir -p Payload out
+          cp -R build/Build/Products/Release-iphoneos/*.app Payload/
+          zip -qr "out/$(basename Payload/*.app .app).ipa" Payload
+      - name: Publier l'artefact
+        uses: actions/upload-artifact@v4
         with:
           name: GitDesk-ipa
-          path: GitDesk.ipa
+          path: out/GitDesk.ipa
+          if-no-files-found: warn
+      - name: Résumer et publier
+        if: always()
+        working-directory: .
+        env:
+          JOB_STATUS: ${{ job.status }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          LOG=/tmp/gitdesk-build.log
+          touch "$LOG"
+          CLEAN=/tmp/gd-clean.log
+          perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' "$LOG" > "$CLEAN" || cp "$LOG" "$CLEAN"
+          END=$(date +%s)
+          DUR=$(( END - ${GD_START:-$END} ))
+          DURTXT="$((DUR / 60)) min $((DUR % 60)) s"
+          PAT='error:|fatal error|BUILD FAILED|FAILURE:|npm ERR|Traceback|panic:|ARCHIVE FAILED'
+          ERR=$(grep -ciE "$PAT" "$CLEAN" || true)
+          WARN=$(grep -ci 'warning:' "$CLEAN" || true)
+          REL="$GITHUB_WORKSPACE/gd-release"
+          rm -rf "$REL"; mkdir -p "$REL"
+          if [ "$JOB_STATUS" = "success" ]; then
+            ( cd '.' && { shopt -s nullglob; shopt -s globstar 2>/dev/null || true; for p in out; do for f in $p; do if [ -d "$f" ]; then cp -R "$f"/. "$REL"/; else cp "$f" "$REL"/; fi; done; done; } ) || true
+          fi
+          cd "$REL"
+          N=$(find . -type f | wc -l | tr -d ' ')
+          D=$(find . -mindepth 2 -type f | wc -l | tr -d ' ')
+          ASSETS=()
+          if [ "$N" -gt 0 ] && [ "$D" -eq 0 ] && [ "$N" -le 10 ]; then
+            for f in *; do ASSETS+=("$REL/$f"); done
+          elif [ "$N" -gt 0 ]; then
+            zip -qr "$GITHUB_WORKSPACE/build-output.zip" . && ASSETS+=("$GITHUB_WORKSPACE/build-output.zip")
+          fi
+          cd "$GITHUB_WORKSPACE"
+          if [ "$JOB_STATUS" = "success" ]; then ICON="✅"; TITLE="Compilation réussie"; else ICON="❌"; TITLE="Compilation échouée"; fi
+          {
+            echo "## $ICON $TITLE : $GD_NAME"
+            echo
+            echo "- **Projet** : $GD_KIND"
+            echo "- **Durée** : $DURTXT"
+            echo "- **Erreurs** : $ERR · **Avertissements** : $WARN"
+            echo "- **Run** : $RUN_URL"
+            if [ "${#ASSETS[@]}" -gt 0 ]; then
+              echo
+              echo "### Fichiers produits"
+              for a in "${ASSETS[@]}"; do echo "- \`$(basename "$a")\` ($(du -h "$a" | cut -f1))"; done
+            fi
+            if [ "$ERR" -gt 0 ]; then
+              echo
+              echo "### Erreurs principales"
+              echo
+              echo '```'
+              grep -iE "$PAT" "$CLEAN" | awk '!seen[$0]++' | head -15 || true
+              echo '```'
+            fi
+            echo
+            echo "### Fin du journal"
+            echo
+            echo '```'
+            tail -n 25 "$CLEAN"
+            echo '```'
+          } > "$GITHUB_WORKSPACE/build-summary.md"
+          cat "$GITHUB_WORKSPACE/build-summary.md" >> "$GITHUB_STEP_SUMMARY"
+          tail -n 20000 "$CLEAN" | gzip -c > "$GITHUB_WORKSPACE/build-log.txt.gz"
+          if [ "$JOB_STATUS" = "success" ]; then TAG="$GD_SLUG-latest"; PRE=""; else TAG="$GD_SLUG-latest-echec"; PRE="--prerelease"; fi
+          FILES=()
+          if [ "$JOB_STATUS" = "success" ]; then FILES+=("${ASSETS[@]}"); fi
+          FILES+=("$GITHUB_WORKSPACE/build-summary.md" "$GITHUB_WORKSPACE/build-log.txt.gz")
+          gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes >/dev/null 2>&1 || true
+          gh release create "$TAG" "${FILES[@]}" --repo "$GITHUB_REPOSITORY" --title "$GD_NAME : $TITLE" --notes-file "$GITHUB_WORKSPACE/build-summary.md" $PRE || echo "::warning::Publication de la release impossible"
+          if [ "$GD_SRC_RELEASE" != "0" ]; then
+            curl -fsS -X DELETE -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$GD_SRC_RELEASE" >/dev/null 2>&1 || true
+          fi

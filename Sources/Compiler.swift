@@ -332,6 +332,17 @@ enum Detector {
 // MARK: - Workflow
 
 enum WorkflowBuilder {
+    struct Params {
+        var name: String
+        var slug: String
+        var kind: String
+        var root: String
+        var extract: String
+        var topic: String?
+        var assetId: Int
+        var releaseId: Int
+    }
+
     static func ind(_ s: String, _ n: Int) -> String {
         let pad = String(repeating: " ", count: n)
         return s.split(separator: "\n", omittingEmptySubsequences: false)
@@ -340,63 +351,178 @@ enum WorkflowBuilder {
     }
 
     static func yq(_ s: String) -> String {
-        s.replacingOccurrences(of: "\\", with: "\\\\").replacingOccurrences(of: "\"", with: "\\\"")
+        s.replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "\n", with: " ")
     }
 
-    static func make(plan: BuildPlan, root: String, extract: String, title: String, topic: String?) -> String {
-        let head = #"""
-        name: GitDesk Build
-        on:
-          push:
-            branches: ['build/**']
-        jobs:
-          build:
-            runs-on: \#(plan.runner)
-            timeout-minutes: 90
-            defaults:
-              run:
-                working-directory: "\#(yq(root))"
-            steps:
-              - uses: actions/checkout@v4
-              - name: Extraire l'archive
-                working-directory: .
-                run: |
-                  mkdir -p src
-                  \#(extract)
+    static func shq(_ s: String) -> String {
+        "'" + s.replacingOccurrences(of: "'", with: "'\\''") + "'"
+    }
+
+    /// Enveloppe commune : le shell personnalisé copie toute la sortie dans /tmp/gitdesk-build.log.
+    static let prepareStep = #"""
+    - name: Préparer
+      shell: bash
+      working-directory: .
+      run: |
+        cat > /tmp/gd-shell.sh <<'GDEOF'
+        #!/usr/bin/env bash
+        bash -eo pipefail "$1" 2>&1 | tee -a /tmp/gitdesk-build.log
+        exit "${PIPESTATUS[0]}"
+        GDEOF
+        chmod +x /tmp/gd-shell.sh
+        echo "GD_START=$(date +%s)" >> "$GITHUB_ENV"
+    """#
+
+    /// Résume le journal puis publie le résultat dans la release « <slug>-latest » (ou « -latest-echec »).
+    static func publishStep(root: String, patterns: String) -> String {
+        #"""
+        - name: Résumer et publier
+          if: always()
+          working-directory: .
+          env:
+            JOB_STATUS: ${{ job.status }}
+            RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          run: |
+            LOG=/tmp/gitdesk-build.log
+            touch "$LOG"
+            CLEAN=/tmp/gd-clean.log
+            perl -pe 's/\e\[[0-9;]*[A-Za-z]//g' "$LOG" > "$CLEAN" || cp "$LOG" "$CLEAN"
+            END=$(date +%s)
+            DUR=$(( END - ${GD_START:-$END} ))
+            DURTXT="$((DUR / 60)) min $((DUR % 60)) s"
+            PAT='error:|fatal error|BUILD FAILED|FAILURE:|npm ERR|Traceback|panic:|ARCHIVE FAILED'
+            ERR=$(grep -ciE "$PAT" "$CLEAN" || true)
+            WARN=$(grep -ci 'warning:' "$CLEAN" || true)
+            REL="$GITHUB_WORKSPACE/gd-release"
+            rm -rf "$REL"; mkdir -p "$REL"
+            if [ "$JOB_STATUS" = "success" ]; then
+              ( cd \#(shq(root)) && { shopt -s nullglob; shopt -s globstar 2>/dev/null || true; for p in \#(patterns); do for f in $p; do if [ -d "$f" ]; then cp -R "$f"/. "$REL"/; else cp "$f" "$REL"/; fi; done; done; } ) || true
+            fi
+            cd "$REL"
+            N=$(find . -type f | wc -l | tr -d ' ')
+            D=$(find . -mindepth 2 -type f | wc -l | tr -d ' ')
+            ASSETS=()
+            if [ "$N" -gt 0 ] && [ "$D" -eq 0 ] && [ "$N" -le 10 ]; then
+              for f in *; do ASSETS+=("$REL/$f"); done
+            elif [ "$N" -gt 0 ]; then
+              zip -qr "$GITHUB_WORKSPACE/build-output.zip" . && ASSETS+=("$GITHUB_WORKSPACE/build-output.zip")
+            fi
+            cd "$GITHUB_WORKSPACE"
+            if [ "$JOB_STATUS" = "success" ]; then ICON="✅"; TITLE="Compilation réussie"; else ICON="❌"; TITLE="Compilation échouée"; fi
+            {
+              echo "## $ICON $TITLE : $GD_NAME"
+              echo
+              echo "- **Projet** : $GD_KIND"
+              echo "- **Durée** : $DURTXT"
+              echo "- **Erreurs** : $ERR · **Avertissements** : $WARN"
+              echo "- **Run** : $RUN_URL"
+              if [ "${#ASSETS[@]}" -gt 0 ]; then
+                echo
+                echo "### Fichiers produits"
+                for a in "${ASSETS[@]}"; do echo "- \`$(basename "$a")\` ($(du -h "$a" | cut -f1))"; done
+              fi
+              if [ "$ERR" -gt 0 ]; then
+                echo
+                echo "### Erreurs principales"
+                echo
+                echo '```'
+                grep -iE "$PAT" "$CLEAN" | awk '!seen[$0]++' | head -15 || true
+                echo '```'
+              fi
+              echo
+              echo "### Fin du journal"
+              echo
+              echo '```'
+              tail -n 25 "$CLEAN"
+              echo '```'
+            } > "$GITHUB_WORKSPACE/build-summary.md"
+            cat "$GITHUB_WORKSPACE/build-summary.md" >> "$GITHUB_STEP_SUMMARY"
+            tail -n 20000 "$CLEAN" | gzip -c > "$GITHUB_WORKSPACE/build-log.txt.gz"
+            if [ "$JOB_STATUS" = "success" ]; then TAG="$GD_SLUG-latest"; PRE=""; else TAG="$GD_SLUG-latest-echec"; PRE="--prerelease"; fi
+            FILES=()
+            if [ "$JOB_STATUS" = "success" ]; then FILES+=("${ASSETS[@]}"); fi
+            FILES+=("$GITHUB_WORKSPACE/build-summary.md" "$GITHUB_WORKSPACE/build-log.txt.gz")
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes >/dev/null 2>&1 || true
+            gh release create "$TAG" "${FILES[@]}" --repo "$GITHUB_REPOSITORY" --title "$GD_NAME : $TITLE" --notes-file "$GITHUB_WORKSPACE/build-summary.md" $PRE || echo "::warning::Publication de la release impossible"
+            if [ "$GD_SRC_RELEASE" != "0" ]; then
+              curl -fsS -X DELETE -H "Authorization: Bearer $GH_TOKEN" "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/$GD_SRC_RELEASE" >/dev/null 2>&1 || true
+            fi
+        """#
+    }
+
+    static func uploadStep(root: String, artifacts: [String]) -> String {
+        var lines = ["- name: Publier l'artefact", "  uses: actions/upload-artifact@v4", "  with:", "    name: gitdesk-build", "    path: |"]
+        for a in artifacts {
+            let path = a.hasPrefix("!") ? "!" + root + "/" + String(a.dropFirst()) : root + "/" + a
+            lines.append("      " + path)
+        }
+        lines.append("    if-no-files-found: warn")
+        return lines.joined(separator: "\n")
+    }
+
+    static func notifyStep(title: String, topic: String) -> String? {
+        let t = String(topic.filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
+        if t.isEmpty { return nil }
+        var ascii = ""
+        for u in title.unicodeScalars {
+            let bad = !u.isASCII || u.value < 32 || u == "\"" || u == "\\" || u == "$" || u == "`"
+            ascii += bad ? "-" : String(Character(u))
+        }
+        return #"""
+        - name: Notifier
+          if: always()
+          working-directory: .
+          env:
+            STATUS: ${{ job.status }}
+            RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          run: |
+            if [ "$STATUS" = "success" ]; then TAG=white_check_mark; MSG="Compilation réussie"; else TAG=x; MSG="Compilation échouée ($STATUS)"; fi
+            curl -fsS -m 20 -H "Title: GitDesk - \#(ascii)" -H "Tags: $TAG" -H "Click: $RUN_URL" -d "$MSG" "https://ntfy.sh/\#(t)" || true
+        """#
+    }
+
+    static func make(plan: BuildPlan, p: Params) -> String {
+        let header = [
+            "name: GitDesk Build",
+            "on:",
+            "  push:",
+            "    branches: ['build/**']",
+            "permissions:",
+            "  contents: write",
+            "env:",
+            "  GD_NAME: \"\(yq(p.name))\"",
+            "  GD_SLUG: \"\(yq(p.slug))\"",
+            "  GD_KIND: \"\(yq(p.kind))\"",
+            "  GD_ASSET: \"\(p.assetId)\"",
+            "  GD_SRC_RELEASE: \"\(p.releaseId)\"",
+            "  GH_TOKEN: ${{ github.token }}",
+            "jobs:",
+            "  build:",
+            "    runs-on: \(plan.runner)",
+            "    timeout-minutes: 90",
+            "    defaults:",
+            "      run:",
+            "        shell: bash /tmp/gd-shell.sh {0}",
+            "        working-directory: \"\(yq(p.root))\"",
+            "    steps:"
+        ].joined(separator: "\n")
+
+        let fetch = #"""
+        - name: Récupérer les sources
+          working-directory: .
+          run: |
+            mkdir -p src
+            curl -fsSL --retry 3 -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" -o source-archive "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/assets/$GD_ASSET"
+            \#(p.extract)
         """#
 
-        var upLines = ["- name: Publier le résultat", "  uses: actions/upload-artifact@v4", "  with:", "    name: gitdesk-build", "    path: |"]
-        for a in plan.artifacts {
-            let p = a.hasPrefix("!") ? "!" + root + "/" + String(a.dropFirst()) : root + "/" + a
-            upLines.append("      " + p)
-        }
-        upLines.append("    if-no-files-found: warn")
-        let upload = ind(upLines.joined(separator: "\n"), 6)
-
-        var out = head + "\n" + ind(plan.steps, 6) + "\n" + upload + "\n"
-
-        if let topic {
-            let t = String(topic.filter { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_") })
-            var ascii = ""
-            for u in title.unicodeScalars {
-                let bad = !u.isASCII || u.value < 32 || u == "\"" || u == "\\" || u == "$" || u == "`"
-                ascii += bad ? "-" : String(Character(u))
-            }
-            if !t.isEmpty {
-                let notify = #"""
-                - name: Notifier
-                  if: always()
-                  working-directory: .
-                  env:
-                    STATUS: ${{ job.status }}
-                    RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-                  run: |
-                    if [ "$STATUS" = "success" ]; then TAG=white_check_mark; MSG="Compilation réussie"; else TAG=x; MSG="Compilation échouée ($STATUS)"; fi
-                    curl -fsS -m 20 -H "Title: GitDesk - \#(ascii)" -H "Tags: $TAG" -H "Click: $RUN_URL" -d "$MSG" "https://ntfy.sh/\#(t)" || true
-                """#
-                out += ind(notify, 6) + "\n"
-            }
-        }
-        return out
+        let patterns = plan.artifacts.filter { !$0.hasPrefix("!") }.joined(separator: " ")
+        var blocks = [prepareStep, fetch, plan.steps,
+                      uploadStep(root: p.root, artifacts: plan.artifacts),
+                      publishStep(root: p.root, patterns: patterns)]
+        if let t = p.topic, let n = notifyStep(title: p.name, topic: t) { blocks.append(n) }
+        return header + "\n" + blocks.map { ind($0, 6) }.joined(separator: "\n") + "\n"
     }
 }
