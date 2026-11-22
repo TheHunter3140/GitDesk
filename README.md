@@ -28,3 +28,12 @@ Même chaîne que Pal : XcodeGen + GitHub Actions, IPA non signé (`.github/work
 - **Navigateur** : réglages mémorisés (taille du texte 50–150 %, défaut 85 %, version ordinateur, limitation à GitHub, dernière page), favoris, historique, session GitHub conservée.
 - **Téléchargements** : gestionnaire dédié (progression, annulation, ouvrir, partager, extraire), fichiers dans Documents/Téléchargements.
 - **Cache et confidentialité** : tailles, vider le cache, cookies, historique, nettoyer le navigateur, tout vider.
+
+## Nouveautés 1.3.0
+- Onglet **Compiler** : dépose une archive complète du code source (ZIP, TAR, TAR.GZ, 50 Mo max), GitDesk s'occupe du reste.
+- Détection automatique du projet : XcodeGen, Xcode (.xcodeproj/.xcworkspace, CocoaPods), Swift Package, Android/Gradle, Gradle/Java, Rust, Go, CMake, Make, Node.js, Python, .NET, et sources C / C++ / Java isolées.
+- Un workflow GitHub Actions est généré, puis l'archive est envoyée telle quelle sur une branche `build/…` d'un dépôt dédié (`gitdesk-builds` par défaut, créé automatiquement). Le workflow s'exécute au push, extrait l'archive et compile (IPA non signé pour iOS, APK pour Android, exécutables sinon).
+- Suivi en direct (en attente / en cours / réussi / échec), reprise du suivi à la réouverture ou en tirant la liste, annulation, étape en échec et fin du journal affichées.
+- Résultat téléchargé et extrait dans Documents/Téléchargements/Builds, partageable (Fichiers, AirDrop, outil de signature).
+- Notifications : push via **ntfy** (dernière étape du workflow, fonctionne app fermée) + notification locale quand l'app est active. Réglages : engrenage de l'onglet Compiler.
+- Token GitHub : portées `repo` et `workflow` requises.

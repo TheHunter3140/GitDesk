@@ -4,8 +4,9 @@ import SwiftUI
 struct GitDeskApp: App {
     @StateObject private var session = Session()
     @StateObject private var clipboard = FileClipboard()
+    @StateObject private var builds = BuildCenter()
     var body: some Scene {
-        WindowGroup { RootView().environmentObject(session).environmentObject(clipboard) }
+        WindowGroup { RootView().environmentObject(session).environmentObject(clipboard).environmentObject(builds) }
     }
 }
 
@@ -86,6 +87,7 @@ struct RootView: View {
         } else {
             TabView {
                 RepoListView().tabItem { Label("Travail", systemImage: "briefcase.fill") }
+                CompilerView().tabItem { Label("Compiler", systemImage: "hammer.fill") }
                 SettingsView().tabItem { Label("Paramètres", systemImage: "gearshape.fill") }
             }
         }
