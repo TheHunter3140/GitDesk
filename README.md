@@ -29,6 +29,10 @@ Même chaîne que Pal : XcodeGen + GitHub Actions, IPA non signé (`.github/work
 - **Téléchargements** : gestionnaire dédié (progression, annulation, ouvrir, partager, extraire), fichiers dans Documents/Téléchargements.
 - **Cache et confidentialité** : tailles, vider le cache, cookies, historique, nettoyer le navigateur, tout vider.
 
+## Correctif 1.4.1
+- Le workflow localise `project.yml` même s'il est dans un sous-dossier du dépôt (cas d'un dossier déposé tel quel sur GitHub).
+- Le résumé des logs reconnaît davantage d'erreurs (projet introuvable, fichier absent, commande introuvable).
+
 ## Nouveautés 1.4.0
 - **Dossier surveillé** : dépose une archive (ZIP, TAR, TAR.GZ) ou un dossier de code source dans Fichiers → GitDesk → Builds. GitDesk le détecte dès que la copie est terminée (app ouverte), le compile automatiquement (réglable), range l'original dans « Traitées » et dépose le résultat dans « Résultats ». Un dossier `Build` / `build` à la racine de Documents est aussi surveillé.
 - **Workflow façon Pal** : journal complet copié dans un fichier, **résumé des logs** (erreurs, avertissements, durée, fin du journal) écrit dans le résumé du run et dans les notes de la release, puis **publication dans la release « <projet>-latest »** (remplacée à chaque build ; en cas d'échec : « <projet>-latest-echec » avec le résumé et le journal). L'artefact Actions reste en secours.

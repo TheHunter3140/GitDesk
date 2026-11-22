@@ -30,6 +30,18 @@ jobs:
           GDEOF
           chmod +x /tmp/gd-shell.sh
           echo "GD_START=$(date +%s)" >> "$GITHUB_ENV"
+      - name: Localiser le projet
+        run: |
+          if [ ! -f project.yml ]; then
+            P=$(find . -maxdepth 3 -name project.yml -not -path './.git/*' | head -1 || true)
+            if [ -z "$P" ]; then
+              echo "error: project.yml introuvable dans le dépôt. Contenu :"
+              find . -maxdepth 2 -not -path './.git*' | head -40 || true
+              exit 1
+            fi
+            echo "Projet trouvé dans $(dirname "$P")"
+            cp -R "$(dirname "$P")"/. .
+          fi
       - name: Installer XcodeGen
         run: brew install xcodegen
       - name: Générer le projet
@@ -65,7 +77,7 @@ jobs:
           END=$(date +%s)
           DUR=$(( END - ${GD_START:-$END} ))
           DURTXT="$((DUR / 60)) min $((DUR % 60)) s"
-          PAT='error:|fatal error|BUILD FAILED|FAILURE:|npm ERR|Traceback|panic:|ARCHIVE FAILED'
+          PAT='error:|fatal error|BUILD FAILED|FAILURE:|npm ERR|Traceback|panic:|ARCHIVE FAILED|No project spec|No such file|command not found|cannot find|not found'
           ERR=$(grep -ciE "$PAT" "$CLEAN" || true)
           WARN=$(grep -ci 'warning:' "$CLEAN" || true)
           REL="$GITHUB_WORKSPACE/gd-release"

@@ -438,7 +438,7 @@ struct SettingsView: View {
                     NavigationLink { FileBrowserView(dir: Paths.documents, title: "Fichiers") } label: { tileLabel("Explorateur de fichiers", "folder.fill", .orange) }
                 }
                 Section("À propos") {
-                    LabeledContent("Version", value: "1.4.0")
+                    LabeledContent("Version", value: "1.4.1")
                 }
             }
             .navigationTitle("Paramètres")

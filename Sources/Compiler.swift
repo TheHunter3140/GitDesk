@@ -392,7 +392,7 @@ enum WorkflowBuilder {
             END=$(date +%s)
             DUR=$(( END - ${GD_START:-$END} ))
             DURTXT="$((DUR / 60)) min $((DUR % 60)) s"
-            PAT='error:|fatal error|BUILD FAILED|FAILURE:|npm ERR|Traceback|panic:|ARCHIVE FAILED'
+            PAT='error:|fatal error|BUILD FAILED|FAILURE:|npm ERR|Traceback|panic:|ARCHIVE FAILED|No project spec|No such file|command not found|cannot find|not found'
             ERR=$(grep -ciE "$PAT" "$CLEAN" || true)
             WARN=$(grep -ci 'warning:' "$CLEAN" || true)
             REL="$GITHUB_WORKSPACE/gd-release"
