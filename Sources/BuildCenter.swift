@@ -695,6 +695,7 @@ final class BuildCenter: ObservableObject {
                 $0.finished = Date()
             }
             await publishIfNeeded(id: id, api: api)
+            Haptic.success()
             notify("Compilation réussie", name)
         } else {
             var summary: String? = nil
@@ -716,6 +717,7 @@ final class BuildCenter: ObservableObject {
                 $0.releaseURL = relURL
                 $0.finished = Date()
             }
+            Haptic.warning()
             notify(c == "cancelled" ? "Compilation annulée" : "Compilation échouée", name)
         }
     }

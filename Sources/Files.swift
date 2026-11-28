@@ -913,6 +913,7 @@ struct FileBrowserView: View {
 
     private func tap(_ it: FileItem) {
         if selecting {
+            Haptic.tap()
             if selection.contains(it.url) { selection.remove(it.url) } else { selection.insert(it.url) }
         } else {
             open(it)
@@ -1108,6 +1109,7 @@ struct FileBrowserView: View {
 
     private func delete(_ urls: [URL], permanent: Bool) {
         toDelete = nil
+        Haptic.warning()
         var err: String?
         if permanent {
             for u in urls {
@@ -1154,6 +1156,7 @@ struct FileBrowserView: View {
             busy = nil
             switch result {
             case .success(let n):
+                Haptic.success()
                 message = "\(n) élément(s) \(op.move ? "déplacé(s)" : "copié(s)")."
                 if op.move { clip.items = []; clip.cut = false }
             case .failure(let e): message = e.localizedDescription

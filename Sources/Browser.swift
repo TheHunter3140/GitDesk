@@ -422,7 +422,13 @@ struct SettingsView: View {
         NavigationStack {
             List {
                 Section("Compte GitHub") {
-                    tileLabel(s.login.isEmpty ? "Connecté" : s.login, "person.fill", .gray)
+                    HStack(spacing: 12) {
+                        Avatar(text: s.login.isEmpty ? "G" : s.login, color: Theme.accent, size: 46)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(s.login.isEmpty ? "Connecté" : s.login).font(.headline)
+                            Text("Compte GitHub").font(.caption).foregroundColor(.secondary)
+                        }
+                    }
                     Button("Se déconnecter", role: .destructive) { confirmOut = true }
                 }
                 Section(header: Text("Navigateur"), footer: Text("Taille du texte des pages : 50 % à 150 %. Tes réglages, favoris, historique et connexion sont mémorisés.")) {
@@ -450,7 +456,7 @@ struct SettingsView: View {
                     NavigationLink { FileBrowserView(dir: Paths.documents, title: "Fichiers") } label: { tileLabel("Explorateur de fichiers", "folder.fill", .orange) }
                 }
                 Section("À propos") {
-                    LabeledContent("Version", value: "1.6.0")
+                    LabeledContent("Version", value: "1.6.1")
                 }
             }
             .navigationTitle("Paramètres")

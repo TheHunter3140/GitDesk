@@ -121,6 +121,21 @@ struct LoginView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    VStack(spacing: 10) {
+                        Image(systemName: "chevron.left.forwardslash.chevron.right")
+                            .font(.system(size: 34, weight: .bold)).foregroundColor(.white)
+                            .frame(width: 76, height: 76)
+                            .background(LinearGradient(colors: [Theme.accent, Color.purple], startPoint: .topLeading, endPoint: .bottomTrailing),
+                                        in: RoundedRectangle(cornerRadius: 20, style: .continuous))
+                            .shadow(color: Theme.accent.opacity(0.35), radius: 10, y: 5)
+                        Text("GitDesk").font(.largeTitle.bold())
+                        Text("Git, éditeur de code et compilation sur ton iPhone.")
+                            .font(.subheadline).foregroundColor(.secondary).multilineTextAlignment(.center)
+                    }
+                    .frame(maxWidth: .infinity).padding(.vertical, 8)
+                    .listRowBackground(Color.clear)
+                }
                 Section(header: Text("1. Crée ton token"),
                         footer: Text("GitHub n'accepte plus le mot de passe dans les apps : le token le remplace. Connecte-toi à GitHub dans la fenêtre, vérifie que « repo » et « workflow » sont cochés, touche « Generate token », puis copie le texte qui commence par ghp_.")) {
                     Button { web = WebTarget(url: URL(string: "https://github.com/settings/tokens/new?scopes=repo,workflow&description=GitDesk")!) } label: {
@@ -161,46 +176,62 @@ struct RepoListView: View {
     var body: some View {
         NavigationStack(path: $path) {
             List {
-                Section("Outils") {
-                    Button { web = WebTarget(url: nil) } label: { tileLabel("Navigateur GitHub", "safari.fill", .blue) }
-                    NavigationLink { DownloadsView() } label: { tileLabel("Téléchargements", "arrow.down.circle.fill", .green) }
-                    NavigationLink { FileBrowserView(dir: Paths.documents, title: "Fichiers") } label: { tileLabel("Fichiers et archives", "folder.fill", .orange) }
-                }
+                Section {
+                    Button { Haptic.tap(); web = WebTarget(url: nil) } label: { ToolRow(title: "Navigateur GitHub", symbol: "safari.fill", color: .blue) }
+                        .buttonStyle(PressableStyle()).cardRow()
+                    NavigationLink { DownloadsView() } label: { ToolRow(title: "Téléchargements", symbol: "arrow.down.circle.fill", color: .green) }
+                        .cardRow()
+                    NavigationLink { FileBrowserView(dir: Paths.documents, title: "Fichiers") } label: { ToolRow(title: "Fichiers et archives", symbol: "folder.fill", color: .orange) }
+                        .cardRow()
+                } header: { SectionTitle("Outils") }
+
                 if !s.local.isEmpty {
-                    Section("Sur l'appareil") {
+                    Section {
                         ForEach(s.local) { r in
-                            NavigationLink(value: r) { Label(r.id, systemImage: "folder") }
+                            NavigationLink(value: r) {
+                                RepoCard(title: r.id, subtitle: nil, isPrivate: false, isLocal: true)
+                            }
+                            .cardRow()
+                            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                                Button(role: .destructive) { Haptic.warning(); s.deleteLocal(r) } label: { Label("Retirer", systemImage: "trash") }
+                            }
+                            .contextMenu {
+                                Button { path.append(r) } label: { Label("Ouvrir", systemImage: "folder") }
+                                Button(role: .destructive) { s.deleteLocal(r) } label: { Label("Retirer de l'appareil", systemImage: "trash") }
+                            }
                         }
-                        .onDelete { idx in
-                            let items = idx.map { s.local[$0] }
-                            items.forEach { s.deleteLocal($0) }
-                        }
-                    }
+                    } header: { SectionTitle("Sur l'appareil") }
                 }
-                Section("GitHub") {
-                    if s.loading && s.remoteRepos.isEmpty { ProgressView() }
+
+                Section {
+                    if s.loading && s.remoteRepos.isEmpty { ProgressView().frame(maxWidth: .infinity).cardRow() }
                     ForEach(filtered) { r in
                         let ref = RepoRef(owner: r.owner.login, name: r.name)
                         Button {
+                            Haptic.tap()
                             if s.local.contains(ref) { path.append(ref) } else { cloning = r }
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
-                                HStack {
-                                    Label(r.full_name, systemImage: r.isPrivate ? "lock" : "book.closed").foregroundColor(.primary)
-                                    Spacer()
-                                    if s.local.contains(ref) { Image(systemName: "checkmark.circle.fill").foregroundColor(.green) }
-                                }
-                                if let d = r.description { Text(d).font(.caption).foregroundColor(.secondary).lineLimit(2) }
-                            }
+                            RepoCard(title: r.full_name, subtitle: r.description, isPrivate: r.isPrivate, isLocal: s.local.contains(ref))
+                        }
+                        .buttonStyle(PressableStyle())
+                        .cardRow()
+                        .swipeActions(edge: .leading) {
+                            Button { Haptic.tap(); cloning = r } label: { Label("Cloner", systemImage: "arrow.down.circle") }.tint(.blue)
+                        }
+                        .swipeActions(edge: .trailing) {
+                            Button { web = gh("/" + r.full_name) } label: { Label("GitHub", systemImage: "globe") }.tint(.indigo)
                         }
                         .contextMenu {
                             Button { cloning = r } label: { Label("Cloner / recloner", systemImage: "arrow.down.circle") }
                             Button { web = gh("/" + r.full_name) } label: { Label("Ouvrir sur GitHub", systemImage: "globe") }
                         }
                     }
-                }
-                if let e = s.error { Text(e).foregroundColor(.red).font(.footnote) }
+                } header: { SectionTitle("GitHub") }
+
+                if let e = s.error { Text(e).foregroundColor(.red).font(.footnote).cardRow() }
             }
+            .listStyle(.plain)
+            .animation(.easeInOut(duration: 0.25), value: filtered.count)
             .fullScreenCover(item: $web) { t in GitHubWebScreen(start: t.url) }
             .navigationDestination(for: RepoRef.self) { r in
                 if let w = s.workspace(r) { WorkspaceView(ws: w) }

@@ -29,6 +29,13 @@ Même chaîne que Pal : XcodeGen + GitHub Actions, IPA non signé (`.github/work
 - **Téléchargements** : gestionnaire dédié (progression, annulation, ouvrir, partager, extraire), fichiers dans Documents/Téléchargements.
 - **Cache et confidentialité** : tailles, vider le cache, cookies, historique, nettoyer le navigateur, tout vider.
 
+## Nouveautés 1.6.1 — refonte graphique complète
+- Accueil : outils, dépôts locaux et dépôts GitHub en cartes de verre avec avatar, badges Privé/Public/Sur l'appareil ; balayage gauche = cloner, droite = GitHub / retirer ; appui long = menu.
+- Compiler : zone de dépôt en verre, cartes de compilation avec pastille d'état, barre de progression, puces (type, « Publié »), balayages (annuler / publier à gauche, supprimer à droite), carte héros dans le détail.
+- Connexion et Paramètres : en-tête, avatar du compte, icônes dégradées.
+- Retours haptiques sur les actions clés (compilation terminée ou échouée, sélection, suppression, copie), animations douces, boutons à effet d'appui.
+- Gestes cohérents : tirer pour actualiser, balayage gauche = action principale, droite = destructif ou secondaire, appui long = même menu partout.
+
 ## Nouveautés 1.6.0 — publication publique, confidentialité, arrière-plan, nouveau design
 - **Deux dépôts** : le dépôt privé de compilation reste comme avant (tout le détail, les logs). En plus, après une compilation réussie, un **dépôt public séparé** reçoit une release avec le résultat compilé, le **code source nettoyé** et une description. Réglages : Compiler → réglages → Publication publique. Bouton « Publier maintenant » dans le détail d'une compilation.
 - **Confidentialité** : avant publication, GitDesk retire du code les jetons (dont ton jeton GitHub exact), clés privées, `.env`, certificats et profils de signature, dossiers `.git`, identifiants d'équipe Apple et adresses noreply GitHub ; commits du dépôt public avec une identité anonyme ; ton jeton n'est jamais écrit dans un fichier. Le code nettoyé n'existe que dans une copie : l'original n'est pas modifié. Ton nom d'utilisateur GitHub reste visible dans l'adresse du dépôt public.

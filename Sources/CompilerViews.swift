@@ -17,15 +17,9 @@ struct CompilerView: View {
         NavigationStack {
             List {
                 Section(footer: Text("Dépose une archive (ZIP, TAR, TAR.GZ) ou un dossier de code source. Le type de projet est détecté, le workflow est généré, la compilation tourne sur GitHub Actions et tu es notifié à la fin.")) {
-                    Button { picking = true } label: {
-                        VStack(spacing: 8) {
-                            Image(systemName: "shippingbox.and.arrow.backward.fill").font(.system(size: 34))
-                            Text("Choisir une archive").font(.headline)
-                            Text("Fichiers, iCloud, AirDrop…").font(.caption).foregroundColor(.secondary)
-                        }
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 14)
-                    }
+                    Button { Haptic.tap(); picking = true } label: { DropZone() }
+                        .buttonStyle(PressableStyle())
+                        .cardRow()
                 }
 
                 Section(header: Text("Dossier surveillé"),
@@ -52,6 +46,7 @@ struct CompilerView: View {
                                 ProgressView()
                             }
                         }
+                        .padding(12).glassCard(16).cardRow()
                     }
                 }
 
@@ -61,16 +56,33 @@ struct CompilerView: View {
                     Section("Compilations") {
                         ForEach(b.jobs) { j in
                             NavigationLink { BuildDetailView(jobId: j.id) } label: { BuildRow(job: j) }
-                        }
-                        .onDelete { idx in
-                            let ids = idx.map { b.jobs[$0].id }
-                            for id in ids { b.delete(id, session: s) }
+                                .cardRow()
+                                .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                                    Button(role: .destructive) { Haptic.warning(); b.delete(j.id, session: s) } label: { Label("Supprimer", systemImage: "trash") }
+                                }
+                                .swipeActions(edge: .leading) {
+                                    if j.state.isActive && j.runId != nil {
+                                        Button { b.cancel(j, session: s) } label: { Label("Annuler", systemImage: "xmark.circle") }.tint(.orange)
+                                    } else if j.state == .success && j.publicURL == nil {
+                                        Button { Haptic.tap(); b.publishNow(j.id, session: s) } label: { Label("Publier", systemImage: "icloud.and.arrow.up") }.tint(.blue)
+                                    }
+                                }
+                                .contextMenu {
+                                    if j.state.isActive && j.runId != nil {
+                                        Button { b.cancel(j, session: s) } label: { Label("Annuler la compilation", systemImage: "xmark.circle") }
+                                    }
+                                    if j.state == .success && j.publicURL == nil {
+                                        Button { b.publishNow(j.id, session: s) } label: { Label("Publier maintenant", systemImage: "icloud.and.arrow.up") }
+                                    }
+                                    Button(role: .destructive) { b.delete(j.id, session: s) } label: { Label("Supprimer", systemImage: "trash") }
+                                }
                         }
                     }
                 }
             }
             .navigationTitle("Compiler")
             .gdScreen()
+            .animation(.easeInOut(duration: 0.25), value: b.jobs)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
@@ -137,21 +149,40 @@ struct BuildStateIcon: View {
 
 struct BuildRow: View {
     let job: BuildJob
+
+    private var color: Color {
+        switch job.state {
+        case .preparing, .queued, .running: return Theme.accent
+        case .success: return .green
+        case .failure: return .red
+        case .cancelled: return .gray
+        case .error: return .orange
+        }
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            BuildStateIcon(state: job.state).frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(job.name).font(.headline).lineLimit(1)
-                Text(job.detail.isEmpty ? job.state.label : job.detail)
-                    .font(.caption).foregroundColor(.secondary).lineLimit(2)
-                HStack(spacing: 6) {
-                    if !job.kind.isEmpty { Text(job.kind) }
-                    Text(job.created.formatted(date: .abbreviated, time: .shortened))
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                BuildStateIcon(state: job.state)
+                    .frame(width: 36, height: 36)
+                    .background(color.opacity(0.15), in: Circle())
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(job.name).font(.headline).lineLimit(1)
+                    Text(job.detail.isEmpty ? job.state.label : job.detail)
+                        .font(.caption).foregroundColor(.secondary).lineLimit(2)
                 }
-                .font(.caption2).foregroundColor(.secondary)
+            }
+            if job.state.isActive { ProgressView().progressViewStyle(.linear) }
+            HStack(spacing: 6) {
+                if !job.kind.isEmpty { Chip(text: job.kind, color: .blue) }
+                if job.publicURL != nil { Chip(text: "Publié", color: .green) }
+                Spacer()
+                Text(job.created.formatted(date: .abbreviated, time: .shortened))
+                    .font(.caption2).foregroundColor(.secondary)
             }
         }
-        .padding(.vertical, 2)
+        .padding(14)
+        .glassCard(18)
     }
 }
 
@@ -168,10 +199,15 @@ struct BuildDetailView: View {
         List {
             if let j = job {
                 Section {
-                    HStack(spacing: 10) {
-                        BuildStateIcon(state: j.state)
-                        Text(j.state.label).font(.headline)
+                    VStack(spacing: 10) {
+                        BuildStateIcon(state: j.state).scaleEffect(1.8).frame(height: 46)
+                        Text(j.name).font(.title2.weight(.bold)).multilineTextAlignment(.center)
+                        Text(j.state.label).font(.subheadline).foregroundColor(.secondary)
+                        if j.state.isActive { ProgressView().progressViewStyle(.linear) }
                     }
+                    .frame(maxWidth: .infinity).padding(18).glassCard(24).cardRow()
+                }
+                Section {
                     if !j.detail.isEmpty {
                         Text(j.detail).font(.subheadline).foregroundColor(.secondary)
                     }
@@ -228,6 +264,7 @@ struct BuildDetailView: View {
         }
         .navigationTitle(job?.name ?? "Compilation")
         .navigationBarTitleDisplayMode(.inline)
+        .gdScreen()
     }
 
     @ViewBuilder
