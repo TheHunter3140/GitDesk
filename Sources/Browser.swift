@@ -113,6 +113,7 @@ final class DownloadManager: ObservableObject {
         let rec = DownloadRecord(name: dest.lastPathComponent, source: source?.absoluteString ?? "", date: Date(), status: "running")
         records.insert(rec, at: 0)
         active[ObjectIdentifier(download)] = (rec.id, download)
+        ActivityKeeper.shared.hold("dl-\(rec.id.uuidString)")
         let id = rec.id
         observers[id] = download.progress.observe(\.fractionCompleted) { [weak self] p, _ in
             let f = p.fractionCompleted
@@ -125,6 +126,7 @@ final class DownloadManager: ObservableObject {
     func finished(_ d: WKDownload) {
         guard let entry = active.removeValue(forKey: ObjectIdentifier(d)) else { return }
         let id = entry.0
+        ActivityKeeper.shared.release("dl-\(id.uuidString)")
         update(id) { r in r.status = "done"; r.size = FSOps.fileSize(r.url) }
         progress[id] = nil
         observers[id] = nil
@@ -133,6 +135,7 @@ final class DownloadManager: ObservableObject {
     func failed(_ d: WKDownload) {
         guard let entry = active.removeValue(forKey: ObjectIdentifier(d)) else { return }
         let id = entry.0
+        ActivityKeeper.shared.release("dl-\(id.uuidString)")
         update(id) { r in r.status = "failed"; try? FileManager.default.removeItem(at: r.url) }
         progress[id] = nil
         observers[id] = nil
@@ -395,8 +398,10 @@ struct IconTile: View {
     var body: some View {
         Image(systemName: symbol)
             .font(.system(size: 15, weight: .semibold)).foregroundColor(.white)
-            .frame(width: 29, height: 29)
-            .background(color, in: RoundedRectangle(cornerRadius: 7, style: .continuous))
+            .frame(width: 30, height: 30)
+            .background(LinearGradient(colors: [color.opacity(0.95), color.opacity(0.68)], startPoint: .topLeading, endPoint: .bottomTrailing),
+                        in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .shadow(color: color.opacity(0.28), radius: 3, y: 2)
     }
 }
 
@@ -408,6 +413,8 @@ struct SettingsView: View {
     @EnvironmentObject var s: Session
     @ObservedObject private var store = BrowserStore.shared
     @AppStorage("fontSize") private var fontSize = 14.0
+    @AppStorage("keep_screen") private var keepScreen = true
+    @AppStorage("keep_alive") private var keepAlive = true
     @State private var web: WebTarget?
     @State private var confirmOut = false
 
@@ -431,6 +438,11 @@ struct SettingsView: View {
                     NavigationLink { DownloadsView() } label: { tileLabel("Téléchargements", "arrow.down.circle.fill", .green) }
                     NavigationLink { CacheManagerView() } label: { tileLabel("Cache et confidentialité", "hand.raised.fill", .indigo) }
                 }
+                Section(header: Text("Travail en arrière-plan"),
+                        footer: Text("Pendant une compilation, un envoi, une publication ou une copie, l'écran reste allumé et, si tu quittes l'app, GitDesk joue un son silencieux pour qu'iOS ne la suspende pas. Tout s'arrête dès que la tâche est finie. Consomme un peu plus de batterie. La mémoire est libérée automatiquement en arrière-plan.")) {
+                    Toggle("Garder l'écran allumé pendant les tâches", isOn: $keepScreen)
+                    Toggle("Continuer en arrière-plan", isOn: $keepAlive)
+                }
                 Section("Éditeur") {
                     Stepper("Taille du code : \(Int(fontSize)) pt", value: $fontSize, in: 9...28)
                 }
@@ -438,10 +450,13 @@ struct SettingsView: View {
                     NavigationLink { FileBrowserView(dir: Paths.documents, title: "Fichiers") } label: { tileLabel("Explorateur de fichiers", "folder.fill", .orange) }
                 }
                 Section("À propos") {
-                    LabeledContent("Version", value: "1.4.1")
+                    LabeledContent("Version", value: "1.6.0")
                 }
             }
             .navigationTitle("Paramètres")
+            .gdScreen()
+            .onChange(of: keepAlive) { _ in ActivityKeeper.shared.refresh() }
+            .onChange(of: keepScreen) { _ in ActivityKeeper.shared.refresh() }
         }
         .fullScreenCover(item: $web) { t in GitHubWebScreen(start: t.url) }
         .confirmationDialog("Se déconnecter de GitHub ?", isPresented: $confirmOut, titleVisibility: .visible) {

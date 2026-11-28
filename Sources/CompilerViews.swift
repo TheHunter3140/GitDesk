@@ -70,6 +70,7 @@ struct CompilerView: View {
                 }
             }
             .navigationTitle("Compiler")
+            .gdScreen()
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button { showSettings = true } label: { Image(systemName: "gearshape") }
@@ -190,6 +191,19 @@ struct BuildDetailView: View {
                         }
                     }
                 }
+                if j.state == .success {
+                    Section(header: Text("Publication publique")) {
+                        if let u = j.publicURL, let url = URL(string: u) {
+                            Link(destination: url) { Label("Voir la publication", systemImage: "globe") }
+                            ShareLink(item: url) { Label("Partager le lien", systemImage: "square.and.arrow.up") }
+                        } else {
+                            Button { Haptic.tap(); b.publishNow(j.id, session: s) } label: { Label("Publier maintenant", systemImage: "icloud.and.arrow.up") }
+                        }
+                        if let r = j.redacted, r > 0 {
+                            Text("\(r) élément(s) sensible(s) retiré(s) du code publié.").font(.footnote).foregroundColor(.secondary)
+                        }
+                    }
+                }
                 if (j.state == .running || j.state == .queued) && j.runId != nil {
                     Section {
                         Button("Annuler la compilation", role: .destructive) { b.cancel(j, session: s) }
@@ -249,6 +263,9 @@ struct CompilerSettingsView: View {
     @AppStorage("build_auto") private var auto = true
     @AppStorage("build_ntfy") private var ntfy = true
     @AppStorage("build_topic") private var topic = ""
+    @AppStorage("build_publish") private var publish = true
+    @AppStorage("build_public_repo") private var pubRepo = "gitdesk-public"
+    @AppStorage("build_clean") private var clean = true
 
     var body: some View {
         NavigationStack {
@@ -263,6 +280,14 @@ struct CompilerSettingsView: View {
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                     Toggle("Privé (à la création)", isOn: $isPrivate)
+                }
+                Section(header: Text("Publication publique"),
+                        footer: Text("Après une compilation réussie, le résultat, le code source nettoyé et une description sont publiés dans un dépôt PUBLIC séparé, créé automatiquement. Le dépôt privé ci-dessus reste inchangé avec tout le détail. Avant publication, GitDesk retire du code les jetons, clés, certificats, profils de signature, dossiers .git et identifiants d'équipe Apple, et publie avec une identité anonyme (ton jeton n'est jamais écrit nulle part). Ton nom d'utilisateur GitHub reste visible dans l'adresse du dépôt public. Un fichier retiré (par exemple google-services.json) n'est pas dans la copie publique. Sans nettoyage, le code source n'est pas publié.")) {
+                    Toggle("Publier après la compilation", isOn: $publish)
+                    TextField("Nom du dépôt public", text: $pubRepo)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Toggle("Nettoyer le code (secrets, clés…)", isOn: $clean)
                 }
                 Section(header: Text("Notifications"),
                         footer: Text("À la fin du workflow, GitHub envoie un push via ntfy, même si GitDesk est fermé. Installe l'app ntfy, appuie sur + et colle ce sujet (serveur ntfy.sh). Garde-le secret : toute personne qui le connaît peut le lire.")) {

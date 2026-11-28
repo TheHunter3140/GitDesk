@@ -49,9 +49,25 @@ jobs:
       - name: Compiler (non signé)
         run: |
           PROJ=$(ls -d *.xcodeproj | head -1)
-          xcodebuild -project "$PROJ" -scheme "GitDesk" -configuration Release \
-            -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          build() {
+            xcodebuild -project "$PROJ" -scheme "GitDesk" -configuration Release \
+              -sdk iphoneos -destination 'generic/platform=iOS' -derivedDataPath build \
+              CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" build
+          }
+          DEFAULT_DEV=$(xcode-select -p)
+          NEWEST=$(ls -d /Applications/Xcode_*.app 2>/dev/null | grep -viE 'beta|rc|candidate' | sort -V | tail -1 || true)
+          if [ -n "$NEWEST" ] && [ "$NEWEST/Contents/Developer" != "$DEFAULT_DEV" ]; then
+            echo "Essai avec $NEWEST (SDK le plus récent)"
+            sudo xcode-select -s "$NEWEST/Contents/Developer"
+            if ! build; then
+              echo "::warning::Échec avec le Xcode récent, repli sur le Xcode par défaut"
+              sudo xcode-select -s "$DEFAULT_DEV"
+              rm -rf build
+              build
+            fi
+          else
+            build
+          fi
       - name: Fabriquer l'IPA
         run: |
           mkdir -p Payload out

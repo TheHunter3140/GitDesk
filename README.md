@@ -29,6 +29,27 @@ Même chaîne que Pal : XcodeGen + GitHub Actions, IPA non signé (`.github/work
 - **Téléchargements** : gestionnaire dédié (progression, annulation, ouvrir, partager, extraire), fichiers dans Documents/Téléchargements.
 - **Cache et confidentialité** : tailles, vider le cache, cookies, historique, nettoyer le navigateur, tout vider.
 
+## Nouveautés 1.6.0 — publication publique, confidentialité, arrière-plan, nouveau design
+- **Deux dépôts** : le dépôt privé de compilation reste comme avant (tout le détail, les logs). En plus, après une compilation réussie, un **dépôt public séparé** reçoit une release avec le résultat compilé, le **code source nettoyé** et une description. Réglages : Compiler → réglages → Publication publique. Bouton « Publier maintenant » dans le détail d'une compilation.
+- **Confidentialité** : avant publication, GitDesk retire du code les jetons (dont ton jeton GitHub exact), clés privées, `.env`, certificats et profils de signature, dossiers `.git`, identifiants d'équipe Apple et adresses noreply GitHub ; commits du dépôt public avec une identité anonyme ; ton jeton n'est jamais écrit dans un fichier. Le code nettoyé n'existe que dans une copie : l'original n'est pas modifié. Ton nom d'utilisateur GitHub reste visible dans l'adresse du dépôt public.
+- **Écran allumé** pendant compilation, envoi, publication, copie et téléchargement.
+- **Continuer en arrière-plan** : tant qu'une tâche tourne, un son silencieux (désactivable) empêche iOS de suspendre l'app ; mémoire libérée automatiquement en arrière-plan ou en cas d'alerte mémoire.
+- **Design** : fond doux, surfaces en verre (Liquid Glass avec un SDK récent, matériau translucide sinon), icônes dégradées, bandeau flottant des tâches en cours, retours haptiques. Gestes identiques partout.
+- Le workflow `build.yml` essaie le Xcode stable le plus récent et revient au Xcode par défaut en cas d'échec.
+
+## Nouveautés 1.5.0 — vrai gestionnaire de fichiers
+- **Plus de chemins à taper** : l'onglet Fichiers d'un dépôt et l'explorateur général sont maintenant le même gestionnaire. On entre dans un dossier en le touchant, un fil d'Ariane cliquable permet de remonter n'importe où, bouton « parent » et balayage depuis le bord gauche pour revenir. Les « / » ne servent plus à déplacer (un nom avec « / » est refusé).
+- **Gestes façon app Fichiers** : appui long = menu (Ouvrir, Aperçu rapide, Copier, Couper, Coller dans…, Déplacer vers…, Copier vers…, Dupliquer, Renommer, Compresser en ZIP, Extraire ici / vers…, Informations, Copier le chemin, Partager, Supprimer) ; balayages sur une ligne (copier/couper, renommer/supprimer) ; **glisser-déposer** d'un ou plusieurs éléments vers un dossier, vers le fil d'Ariane ou le dossier courant ; glisser des fichiers depuis l'app Fichiers d'Apple directement dans la liste.
+- **Sélection multiple** avec barre d'actions (copier, couper, déplacer, partager, supprimer, plus), « Tout / Aucun ».
+- **Fichiers cachés** (nom commençant par « . ») : bouton œil, réglage mémorisé, compteur « N cachés » en bas ; affichés en grisé.
+- **Affichage** : liste ou grille avec miniatures d'images, tri par nom / date / taille / type, ordre, dossiers en premier.
+- **Recherche** par nom dans le dossier et ses sous-dossiers ; dans un dépôt, recherche dans le code (touche « Rechercher »).
+- **Dépôt** : fichiers modifiés (M), ajoutés (A) et dossiers contenant des changements colorés ; ouverture dans l'éditeur du dépôt.
+- **Corbeille** : supprimer envoie à la corbeille (restaurer, vider, ou suppression définitive au choix).
+- **Informations** : taille réelle (dossiers compris), dates, permissions, chemin.
+- **Actualisation automatique** : un fichier déposé via l'app Fichiers apparaît seul ; la détection du dossier surveillé « Builds » est inchangée.
+- Le workflow `.github/workflows/build.yml` est fourni tel quel (IPA non signé, release `gitdesk-latest`).
+
 ## Correctif 1.4.1
 - Le workflow localise `project.yml` même s'il est dans un sous-dossier du dépôt (cas d'un dossier déposé tel quel sur GitHub).
 - Le résumé des logs reconnaît davantage d'erreurs (projet introuvable, fichier absent, commande introuvable).
@@ -36,7 +57,7 @@ Même chaîne que Pal : XcodeGen + GitHub Actions, IPA non signé (`.github/work
 ## Nouveautés 1.4.0
 - **Dossier surveillé** : dépose une archive (ZIP, TAR, TAR.GZ) ou un dossier de code source dans Fichiers → GitDesk → Builds. GitDesk le détecte dès que la copie est terminée (app ouverte), le compile automatiquement (réglable), range l'original dans « Traitées » et dépose le résultat dans « Résultats ». Un dossier `Build` / `build` à la racine de Documents est aussi surveillé.
 - **Workflow façon Pal** : journal complet copié dans un fichier, **résumé des logs** (erreurs, avertissements, durée, fin du journal) écrit dans le résumé du run et dans les notes de la release, puis **publication dans la release « <projet>-latest »** (remplacée à chaque build ; en cas d'échec : « <projet>-latest-echec » avec le résumé et le journal). L'artefact Actions reste en secours.
-- Le workflow de GitDesk lui-même (`.github/workflows/build.yaml`) suit le même modèle : l'IPA non signé est publié dans la release **gitdesk-latest**.
+- Le workflow de GitDesk lui-même (`.github/workflows/build.yml`) suit le même modèle : l'IPA non signé est publié dans la release **gitdesk-latest**.
 - **Plus de limite à 50 Mo** : l'archive est envoyée comme fichier d'une release brouillon (2 Go maximum, envoi depuis le disque), puis supprimée après le build.
 - Dossier compressé localement avec conservation des bits d'exécution (gradlew, scripts).
 - Téléchargements sécurisés : le jeton n'est plus transmis lors des redirections vers un autre hôte.

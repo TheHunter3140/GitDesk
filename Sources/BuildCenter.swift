@@ -41,6 +41,9 @@ struct BuildJob: Codable, Identifiable, Equatable {
     var slug: String? = nil
     var releaseURL: String? = nil
     var sourceReleaseId: Int? = nil
+    var publicURL: String? = nil     // publication publique (release)
+    var pubSource: String? = nil     // code nettoyé en attente de publication (relatif à Documents)
+    var redacted: Int? = nil         // éléments sensibles retirés du code publié
 }
 
 struct InboxItem: Identifiable, Equatable {
@@ -72,6 +75,8 @@ enum BuildSettings {
         return v.isEmpty ? "gitdesk-builds" : v
     }
     static var isPrivate: Bool { UserDefaults.standard.object(forKey: "build_private") as? Bool ?? true }
+    static var publish: Bool { UserDefaults.standard.object(forKey: "build_publish") as? Bool ?? true }
+    static var clean: Bool { UserDefaults.standard.object(forKey: "build_clean") as? Bool ?? true }
     static var ntfyOn: Bool { UserDefaults.standard.object(forKey: "build_ntfy") as? Bool ?? true }
     static var auto: Bool { UserDefaults.standard.object(forKey: "build_auto") as? Bool ?? true }
     static var topic: String {
@@ -96,6 +101,8 @@ enum BuildPaths {
     static var work: URL { make(state.appendingPathComponent("work", isDirectory: true)) }
     static var done: URL { make(root.appendingPathComponent("Traitées", isDirectory: true)) }
     static var results: URL { make(root.appendingPathComponent("Résultats", isDirectory: true)) }
+    /// Code nettoyé en attente de publication publique.
+    static var pub: URL { make(state.appendingPathComponent("pub", isDirectory: true)) }
 
     static func relative(_ url: URL) -> String {
         let prefix = Paths.documents.path + "/"
@@ -157,16 +164,23 @@ final class RedirectGuard: NSObject, URLSessionTaskDelegate {
 @MainActor
 final class BackgroundGuard {
     private var task: UIBackgroundTaskIdentifier = .invalid
+    private let key = UUID().uuidString
     func begin() {
         task = UIApplication.shared.beginBackgroundTask(withName: "gitdesk-build") { [weak self] in
-            self?.end()
+            self?.endTask()
         }
+        // Écran allumé + maintien en arrière-plan tant que la tâche dure.
+        ActivityKeeper.shared.hold(key)
     }
-    func end() {
+    private func endTask() {
         if task != .invalid {
             UIApplication.shared.endBackgroundTask(task)
             task = .invalid
         }
+    }
+    func end() {
+        endTask()
+        ActivityKeeper.shared.release(key)
     }
 }
 
@@ -525,6 +539,19 @@ final class BuildCenter: ObservableObject {
             let plan = result.0
             let rootPath = result.1
 
+            if BuildSettings.clean {
+                setDetail(id, "Préparation de la version publique…")
+                let tokenCopy = api.token
+                let pubZip = BuildPaths.pub.appendingPathComponent("\(id)-source.zip")
+                let rep = await Task.detached(priority: .userInitiated) { () -> SourceSanitizer.Report? in
+                    let r = SourceSanitizer.clean(ex, token: tokenCopy)
+                    do { _ = try ZipWriter.zip(directory: ex, to: pubZip); return r } catch { return nil }
+                }.value
+                if let rep = rep {
+                    mutate(id) { $0.pubSource = BuildPaths.relative(pubZip); $0.redacted = rep.total }
+                }
+            }
+
             let name = jobs.first { $0.id == id }?.name ?? "Projet"
             let slug = asciiSlug(name)
             mutate(id) { $0.kind = plan.kind.rawValue; $0.slug = slug }
@@ -667,6 +694,7 @@ final class BuildCenter: ObservableObject {
                 $0.releaseURL = relURL
                 $0.finished = Date()
             }
+            await publishIfNeeded(id: id, api: api)
             notify("Compilation réussie", name)
         } else {
             var summary: String? = nil
@@ -810,6 +838,63 @@ final class BuildCenter: ObservableObject {
         }
     }
 
+    // MARK: Publication publique
+
+    func publishNow(_ id: String, session: Session) {
+        guard let api = session.api else { return }
+        Task {
+            let bg = BackgroundGuard()
+            bg.begin()
+            await publishIfNeeded(id: id, api: api, force: true)
+            bg.end()
+        }
+    }
+
+    private func publishIfNeeded(id: String, api: GitHubAPI, force: Bool = false) async {
+        guard force || BuildSettings.publish, let j = jobs.first(where: { $0.id == id }), j.state == .success else { return }
+        if j.publicURL != nil && !force { return }
+        let prev = j.detail
+        setDetail(id, "Publication publique…")
+        let fm = FileManager.default
+        var files: [URL] = []
+        var tempZip: URL? = nil
+        if let rel = j.artifactDir {
+            let dir = Paths.documents.appendingPathComponent(rel)
+            let all = ((try? fm.contentsOfDirectory(at: dir, includingPropertiesForKeys: [.isDirectoryKey])) ?? [])
+                .filter { !$0.lastPathComponent.hasPrefix(".") && !$0.lastPathComponent.contains("-source.") && $0.lastPathComponent != "build-summary.md" }
+            let simple = all.count <= 10 && all.allSatisfy { (try? $0.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) != true }
+            if simple {
+                files = all
+            } else if !all.isEmpty {
+                let z = fm.temporaryDirectory.appendingPathComponent("\(asciiSlug(j.name))-resultat-\(String(id.prefix(4))).zip")
+                let ok = await Task.detached { () -> Bool in (try? ZipWriter.zip(directory: dir, to: z)) != nil }.value
+                if ok { files = [z]; tempZip = z }
+            }
+        }
+        var source: URL? = nil
+        if let p = j.pubSource {
+            let u = Paths.documents.appendingPathComponent(p)
+            if fm.fileExists(atPath: u.path) { source = u }
+        }
+        var login = j.owner
+        if login.isEmpty { login = (try? await api.me()) ?? "" }
+        do {
+            let url = try await Publisher.publish(api: api, login: login, privateName: j.repo, name: j.name,
+                                                  slug: j.slug ?? asciiSlug(j.name), kind: j.kind, id: id,
+                                                  files: files, source: source, redacted: j.redacted ?? 0)
+            mutate(id) { $0.publicURL = url; $0.detail = prev }
+            if let src = source {
+                try? fm.removeItem(at: src)
+                mutate(id) { $0.pubSource = nil }
+            }
+        } catch {
+            let msg = error.localizedDescription
+            mutate(id) { $0.detail = prev; $0.log = ($0.log ?? "") + "\nPublication publique : " + msg }
+            notify("Publication impossible", "\(j.name) : \(msg)")
+        }
+        if let z = tempZip { try? fm.removeItem(at: z) }
+    }
+
     // MARK: Actions
 
     func cancel(_ job: BuildJob, session: Session) {
@@ -823,6 +908,7 @@ final class BuildCenter: ObservableObject {
         if let d = j.artifactDir {
             try? FileManager.default.removeItem(at: Paths.documents.appendingPathComponent(d))
         }
+        if let p = j.pubSource { try? FileManager.default.removeItem(at: Paths.documents.appendingPathComponent(p)) }
         if !j.branch.isEmpty, let api = session.api {
             let r = RepoRef(owner: j.owner, name: j.repo)
             let b = j.branch

@@ -4,10 +4,6 @@ struct WorkspaceView: View {
     @ObservedObject var ws: Workspace
     @StateObject private var web: WebModel
     @State private var tab = 0
-    @State private var showNew = false
-    @State private var newIsFolder = false
-    @State private var newName = ""
-    @State private var showFiles = false
 
     init(ws: Workspace) {
         _ws = ObservedObject(wrappedValue: ws)
@@ -33,15 +29,6 @@ struct WorkspaceView: View {
                 }
             }
             ToolbarItemGroup(placement: .navigationBarTrailing) {
-                if tab == 0 {
-                    Menu {
-                        Button { newIsFolder = false; newName = ""; showNew = true } label: { Label("Nouveau fichier", systemImage: "doc.badge.plus") }
-                        Button { newIsFolder = true; newName = ""; showNew = true } label: { Label("Nouveau dossier", systemImage: "folder.badge.plus") }
-                        Divider()
-                        Button { showFiles = true } label: { Label("Importer, extraire, copier…", systemImage: "square.and.arrow.down.on.square") }
-                    } label: { Image(systemName: "plus") }
-                    .accessibilityLabel("Nouveau")
-                }
                 if tab != 4 {
                     Button { Task { await ws.pull() } } label: { Image(systemName: "arrow.down.circle") }
                         .disabled(ws.busy).accessibilityLabel("Pull")
@@ -55,12 +42,6 @@ struct WorkspaceView: View {
             }
         }
         .task { await ws.refresh() }
-        .sheet(isPresented: $showFiles, onDismiss: { Task { await ws.refresh() } }) {
-            NavigationStack {
-                FileBrowserView(dir: ws.root, title: ws.repo.name)
-                    .toolbar { ToolbarItem(placement: .cancellationAction) { Button("Fermer") { showFiles = false } } }
-            }
-        }
         .alert("Erreur", isPresented: Binding(get: { ws.error != nil }, set: { if !$0 { ws.error = nil } })) {
             Button("OK") {}
         } message: { Text(ws.error ?? "") }
@@ -73,110 +54,27 @@ struct WorkspaceView: View {
             }
             Button("OK") {}
         } message: { Text(ws.info ?? "") }
-        .alert(newIsFolder ? "Nouveau dossier" : "Nouveau fichier", isPresented: $showNew) {
-            TextField("chemin/nom", text: $newName).textInputAutocapitalization(.never).autocorrectionDisabled()
-            Button("Créer") { let n = newName; let f = newIsFolder; Task { await ws.create(n, folder: f) } }
-            Button("Annuler", role: .cancel) {}
-        }
-    }
-}
-
-private func icon(_ name: String) -> String {
-    switch (name as NSString).pathExtension.lowercased() {
-    case "swift": return "swift"
-    case "md", "txt": return "doc.text"
-    case "json": return "curlybraces"
-    case "yml", "yaml", "toml": return "gearshape"
-    case "png", "jpg", "jpeg", "gif", "heic", "svg": return "photo"
-    default: return "doc"
     }
 }
 
 struct FilesTab: View {
     @ObservedObject var ws: Workspace
     var onCommit: () -> Void
-    @State private var q = ""
-    @State private var hits: [SearchHit] = []
-    @State private var searched = false
-    @State private var renameTarget: String?
-    @State private var renameText = ""
-    @State private var deleteTarget: String?
-
-    private var kinds: [String: Change.Kind] {
-        Dictionary(ws.changes.map { ($0.path, $0.kind) }, uniquingKeysWith: { a, _ in a })
-    }
 
     var body: some View {
-        Group {
-            if q.isEmpty { tree } else { results }
-        }
-        .searchable(text: $q, prompt: "Rechercher dans le code")
-        .onSubmit(of: .search) { let t = q; Task { hits = await ws.search(t); searched = true } }
-        .onChange(of: q) { _ in searched = false; if q.isEmpty { hits = [] } }
-        .safeAreaInset(edge: .bottom) {
-            if !ws.changes.isEmpty && q.isEmpty {
-                Button { onCommit() } label: {
-                    Label("\(ws.changes.count) modification(s) · Commit", systemImage: "arrow.up.circle.fill")
-                        .padding(.horizontal, 16).padding(.vertical, 10)
-                        .background(.thinMaterial, in: Capsule())
-                }
-                .padding(.bottom, 6)
-            }
-        }
-        .alert("Renommer", isPresented: Binding(get: { renameTarget != nil }, set: { if !$0 { renameTarget = nil } })) {
-            TextField("nouveau/chemin", text: $renameText).textInputAutocapitalization(.never).autocorrectionDisabled()
-            Button("OK") {
-                if let from = renameTarget { let to = renameText; Task { await ws.rename(from, to: to) } }
-                renameTarget = nil
-            }
-            Button("Annuler", role: .cancel) { renameTarget = nil }
-        }
-        .confirmationDialog("Supprimer cet élément ?", isPresented: Binding(get: { deleteTarget != nil }, set: { if !$0 { deleteTarget = nil } }), titleVisibility: .visible) {
-            Button("Supprimer", role: .destructive) {
-                if let p = deleteTarget { Task { await ws.delete(p) } }
-                deleteTarget = nil
-            }
-        } message: { Text(deleteTarget ?? "") }
-    }
-
-    private var tree: some View {
-        List(ws.nodes, children: \.children) { n in
-            Group {
-                if n.children == nil {
-                    NavigationLink { EditorView(ws: ws, path: n.id) } label: {
-                        Label(n.name, systemImage: icon(n.name))
-                            .foregroundColor(kinds[n.id] == nil ? .primary : .orange)
+        FileBrowserView(dir: ws.root, title: ws.repo.name,
+                        onChange: { Task { await ws.refresh() } },
+                        ws: ws, gitChanges: ws.changes, embedded: true)
+            .safeAreaInset(edge: .bottom) {
+                if !ws.changes.isEmpty {
+                    Button { onCommit() } label: {
+                        Label("\(ws.changes.count) modification(s) · Commit", systemImage: "arrow.up.circle.fill")
+                            .padding(.horizontal, 16).padding(.vertical, 10)
+                            .background(.thinMaterial, in: Capsule())
                     }
-                } else {
-                    Label(n.name, systemImage: "folder")
+                    .padding(.bottom, 6)
                 }
             }
-            .contextMenu {
-                Button { renameTarget = n.id; renameText = n.id } label: { Label("Renommer / déplacer", systemImage: "pencil") }
-                Button(role: .destructive) { deleteTarget = n.id } label: { Label("Supprimer", systemImage: "trash") }
-            }
-        }
-        .listStyle(.plain)
-        .refreshable { await ws.refresh() }
-    }
-
-    private var results: some View {
-        List {
-            if !searched {
-                Text("Touche « Rechercher » au clavier pour chercher dans tous les fichiers.").foregroundColor(.secondary)
-            } else if hits.isEmpty {
-                Text("Aucun résultat.").foregroundColor(.secondary)
-            }
-            ForEach(hits) { h in
-                NavigationLink { EditorView(ws: ws, path: h.path) } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(h.text).font(.system(size: 13, design: .monospaced)).lineLimit(2)
-                        Text("\(h.path):\(h.line)").font(.caption).foregroundColor(.secondary)
-                    }
-                }
-            }
-        }
-        .listStyle(.plain)
     }
 }
 

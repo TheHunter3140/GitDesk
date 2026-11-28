@@ -6,8 +6,8 @@ options:
 settings:
   base:
     SWIFT_VERSION: "5.9"
-    MARKETING_VERSION: "1.4.1"
-    CURRENT_PROJECT_VERSION: "6"
+    MARKETING_VERSION: "1.6.0"
+    CURRENT_PROJECT_VERSION: "8"
     CODE_SIGNING_ALLOWED: "NO"
     CODE_SIGNING_REQUIRED: "NO"
     CODE_SIGN_IDENTITY: ""
@@ -24,6 +24,11 @@ targets:
         UIFileSharingEnabled: true
         LSSupportsOpeningDocumentsInPlace: true
         ITSAppUsesNonExemptEncryption: false
+        UIBackgroundModes: [audio]
+        UTExportedTypeDeclarations:
+          - UTTypeIdentifier: com.local.gitdesk.dragitem
+            UTTypeDescription: Élément GitDesk
+            UTTypeConformsTo: [public.data]
         UISupportedInterfaceOrientations: [UIInterfaceOrientationPortrait, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
         UISupportedInterfaceOrientations~ipad: [UIInterfaceOrientationPortrait, UIInterfaceOrientationPortraitUpsideDown, UIInterfaceOrientationLandscapeLeft, UIInterfaceOrientationLandscapeRight]
     settings:

@@ -5,8 +5,17 @@ struct GitDeskApp: App {
     @StateObject private var session = Session()
     @StateObject private var clipboard = FileClipboard()
     @StateObject private var builds = BuildCenter()
+    @Environment(\.scenePhase) private var phase
+
+    init() { Memory.install() }
+
     var body: some Scene {
-        WindowGroup { RootView().environmentObject(session).environmentObject(clipboard).environmentObject(builds) }
+        WindowGroup {
+            RootView()
+                .environmentObject(session).environmentObject(clipboard).environmentObject(builds)
+                .tint(Theme.accent)
+                .onChange(of: phase) { p in if p == .background { Memory.trim() } }
+        }
     }
 }
 
@@ -82,15 +91,23 @@ final class Session: ObservableObject {
 struct RootView: View {
     @EnvironmentObject var s: Session
     @EnvironmentObject var builds: BuildCenter
+    @State private var tab = 0
+
     var body: some View {
         if s.token == nil {
             LoginView()
         } else {
-            TabView {
-                RepoListView().tabItem { Label("Travail", systemImage: "briefcase.fill") }
-                CompilerView().tabItem { Label("Compiler", systemImage: "hammer.fill") }
-                SettingsView().tabItem { Label("Paramètres", systemImage: "gearshape.fill") }
+            TabView(selection: $tab) {
+                RepoListView().tabItem { Label("Travail", systemImage: "briefcase.fill") }.tag(0)
+                CompilerView().tabItem { Label("Compiler", systemImage: "hammer.fill") }.tag(1)
+                SettingsView().tabItem { Label("Paramètres", systemImage: "gearshape.fill") }.tag(2)
             }
+            .overlay(alignment: .bottom) {
+                if tab != 1 {
+                    ActivityBanner { Haptic.tap(); tab = 1 }.padding(.bottom, 58)
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: builds.jobs.filter { $0.state.isActive }.count)
             .task { builds.start(session: s) }
         }
     }
@@ -123,6 +140,7 @@ struct LoginView: View {
                 if let e = s.error { Section { Text(e).foregroundColor(.red).font(.footnote) } }
             }
             .navigationTitle("GitDesk")
+            .gdScreen()
         }
         .fullScreenCover(item: $web) { t in GitHubWebScreen(start: t.url) }
     }
@@ -190,6 +208,7 @@ struct RepoListView: View {
             .searchable(text: $q, prompt: "Filtrer les dépôts")
             .refreshable { await s.refresh() }
             .navigationTitle("Travail")
+            .gdScreen()
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Menu {
